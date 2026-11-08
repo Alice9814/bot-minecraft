@@ -43,29 +43,46 @@ jobs:
           sudo apt-get install -y \
             build-essential git zip unzip \
             libffi-dev libssl-dev zlib1g-dev \
-            libncurses5-dev libncursesw5-dev
+            libncurses5-dev libncursesw5-dev \
+            libdouble-conversion3
 
       - name: Install Qt for Python deployment tools
         run: |
           python -m pip install --upgrade pip
           python -m pip install "PySide6==6.12.0" qtpip
+          python -m pip install "markupsafe==2.0.1" Jinja2 tqdm
 
       - name: Download Android ARM64 Qt wheels
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/android/wheels"
           cd "$GITHUB_WORKSPACE/android/wheels"
+
           qtpip download PySide6 --android --arch aarch64
           qtpip download shiboken6 --android --arch aarch64
-          echo "PySide6 wheel:"
-          find . -maxdepth 1 -type f -iname 'pyside6-*.whl' -print
-          echo "Shiboken6 wheel:"
-          find . -maxdepth 1 -type f -iname 'shiboken6-*.whl' -print
+
+          PYSIDE_WHEEL="$(find . -maxdepth 1 -type f -iname 'pyside6-*.whl' -print -quit)"
+          SHIBOKEN_WHEEL="$(find . -maxdepth 1 -type f -iname 'shiboken6-*.whl' -print -quit)"
+
+          if [ -z "$PYSIDE_WHEEL" ] || [ -z "$SHIBOKEN_WHEEL" ]; then
+            echo "qtpip did not download both Android ARM64 wheels."
+            ls -lah
+            exit 1
+          fi
+
+          echo "Downloaded wheels:"
+          ls -lh "$PYSIDE_WHEEL" "$SHIBOKEN_WHEEL"
 
       - name: Download Android SDK and NDK required by Qt
+        shell: bash
         run: |
+          set -euo pipefail
           git clone --depth 1 --branch 6.12 https://code.qt.io/pyside/pyside-setup.git "$RUNNER_TEMP/pyside-setup"
           cd "$RUNNER_TEMP/pyside-setup"
+
+          python -m pip install -r tools/cross_compile_android/requirements.txt
+
           python tools/cross_compile_android/main.py \
             --download-only \
             --skip-update \
@@ -74,6 +91,8 @@ jobs:
       - name: Build experimental APK
         shell: bash
         run: |
+          set -euo pipefail
+
           PYSIDE_WHEEL="$(find android/wheels -maxdepth 1 -type f -iname 'pyside6-*.whl' -print -quit)"
           SHIBOKEN_WHEEL="$(find android/wheels -maxdepth 1 -type f -iname 'shiboken6-*.whl' -print -quit)"
 
@@ -94,6 +113,7 @@ jobs:
             echo "The Android deployment command finished but no APK was found."
             exit 1
           fi
+
           cp "$APK_PATH" dist/ProtoBot-android-arm64-experimental.apk
           ls -lh dist/ProtoBot-android-arm64-experimental.apk
 
