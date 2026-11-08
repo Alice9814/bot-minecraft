@@ -80,7 +80,7 @@
   function init() {
     document.querySelectorAll(".nav-item").forEach(item => item.addEventListener("click",() => showPage(item.dataset.section)));
     document.querySelectorAll("[data-go]").forEach(item => item.addEventListener("click",() => showPage(item.dataset.go)));
-    byId("startButton").addEventListener("click",() => call("startBot"));
+    byId("startButton").addEventListener("click",() => { call("saveConfig",collectConfig()); call("startBot"); });
     byId("pauseButton").addEventListener("click",() => call("togglePause"));
     byId("stopButton").addEventListener("click",() => call("stopBot"));
     byId("saveButton").addEventListener("click",() => call("saveConfig",collectConfig()));
