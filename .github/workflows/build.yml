@@ -21,7 +21,7 @@ jobs:
             artifact: minecraft-ai-bot-windows
           - os: ubuntu-22.04
             artifact: minecraft-ai-bot-linux
-    runs-on: ${{ matrix.os }}
+    runs-on: \${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,19 +40,19 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Verify runtime imports
         run: |
-          python -c "import protobot; import llama_cpp; from PySide6.QtWidgets import QApplication; print('ProtoBot', protobot.__version__, 'and llama.cpp runtime OK')"
+          python -c "import protobot; import llama_cpp; from PySide6.QtWidgets import QApplication; from PySide6.QtWebEngineWidgets import QWebEngineView; from PySide6.QtWebChannel import QWebChannel; print('ProtoBot, llama.cpp and Qt WebEngine OK')"
       - name: Build Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json;." --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
+          pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json;." --add-data "interface;interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
       - name: Build Linux application
         if: runner.os == 'Linux'
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json:." --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
+          pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json:." --add-data "interface:interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/MinecraftAIBot/
+          name: \${{ matrix.artifact }}
+          path: dist/ProtoBot/
           if-no-files-found: error
