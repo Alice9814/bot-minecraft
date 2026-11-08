@@ -1,0 +1,51 @@
+name: Build desktop applications
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: minecraft-ai-bot-windows
+          - os: ubuntu-22.04
+            artifact: minecraft-ai-bot-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Linux build libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libegl1
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Build Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json;." --collect-all javascript --collect-all PySide6 desktop_app.py
+      - name: Build Linux application
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --noconfirm --clean --onedir --name MinecraftAIBot --add-data "config.json:." --collect-all javascript --collect-all PySide6 desktop_app.py
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/MinecraftAIBot/
+          if-no-files-found: error
