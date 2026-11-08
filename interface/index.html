@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ProtoBot</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">P</div>
+        <div><strong>ProtoBot</strong><small>Minecraft AI</small></div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-section="dashboard"><span class="nav-icon">⌂</span> Visão geral</button>
+        <button class="nav-item" data-section="settings"><span class="nav-icon">⚙</span> Configurações</button>
+        <button class="nav-item" data-section="console"><span class="nav-icon">⌘</span> Console</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="connection-dot" id="sideDot"></span>
+        <span id="sideStatus">Bot desconectado</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><span class="eyebrow">MINECRAFT JAVA EDITION</span><h1 id="pageTitle">Visão geral</h1></div>
+        <div class="top-status"><span class="status-dot" id="statusDot"></span><span id="statusText">Parado</span></div>
+      </header>
+
+      <section class="page active" id="page-dashboard">
+        <div class="welcome-card">
+          <div>
+            <span class="eyebrow">ASSISTENTE AUTÔNOMO</span>
+            <h2>Seu bot, pronto para explorar.</h2>
+            <p>Configure a conexão, inicie o ProtoBot e acompanhe as atividades em tempo real.</p>
+          </div>
+          <div class="welcome-orb">P</div>
+        </div>
+
+        <div class="grid-two">
+          <article class="panel">
+            <div class="panel-heading"><div><span class="eyebrow">CONEXÃO</span><h3>Servidor Minecraft</h3></div><span class="tag">Java</span></div>
+            <div class="detail-row"><span>Endereço</span><strong id="serverAddress">127.0.0.1:25565</strong></div>
+            <div class="detail-row"><span>Nome do bot</span><strong id="botName">OllamaBot</strong></div>
+            <div class="detail-row"><span>Autenticação</span><strong id="authMode">Offline</strong></div>
+            <button class="button button-secondary full" data-go="settings">Editar conexão</button>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><div><span class="eyebrow">INTELIGÊNCIA ARTIFICIAL</span><h3>Modelo local</h3></div><span class="tag tag-green">Offline</span></div>
+            <div class="model-name">Gemma 3 1B Instruct</div>
+            <p class="muted">GGUF Q4_K_M · Execução local via llama.cpp</p>
+            <div class="detail-row"><span>Temperatura</span><strong id="temperatureValue">0.7</strong></div>
+            <div class="detail-row"><span>Download inicial</span><strong>~806 MB</strong></div>
+          </article>
+        </div>
+
+        <article class="panel controls-panel">
+          <div><span class="eyebrow">CONTROLE</span><h3>Gerenciar bot</h3><p class="muted">Os controles são aplicados ao processo do bot.</p></div>
+          <div class="control-buttons">
+            <button class="button button-primary" id="startButton">▶ Iniciar bot</button>
+            <button class="button button-secondary" id="pauseButton" disabled>Ⅱ Pausar</button>
+            <button class="button button-danger" id="stopButton" disabled>■ Encerrar</button>
+          </div>
+        </article>
+
+        <article class="panel console-panel">
+          <div class="panel-heading"><div><span class="eyebrow">ATIVIDADE RECENTE</span><h3>Console</h3></div><button class="text-button" data-go="console">Abrir console →</button></div>
+          <pre class="log-preview" id="dashboardLogs">Aguardando inicialização...</pre>
+        </article>
+      </section>
+
+      <section class="page" id="page-settings">
+        <div class="section-intro"><span class="eyebrow">PERSONALIZAÇÃO</span><h2>Configurações</h2><p>Defina como o ProtoBot se conecta e como a IA responde.</p></div>
+        <article class="panel form-panel">
+          <div class="panel-heading"><div><span class="eyebrow">MINECRAFT JAVA</span><h3>Servidor</h3></div></div>
+          <div class="form-grid">
+            <label class="field field-wide">Endereço do servidor<input id="hostInput" type="text" placeholder="play.exemplo.com"></label>
+            <label class="field">Porta<input id="portInput" type="number" min="1" max="65535"></label>
+            <label class="field">Nome do bot<input id="usernameInput" type="text" maxlength="16"></label>
+            <label class="field">Autenticação<select id="authInput"><option value="offline">Offline</option><option value="microsoft">Microsoft</option></select></label>
+            <label class="field">Versão do Minecraft<input id="versionInput" type="text" placeholder="26.2"></label>
+          </div>
+        </article>
+        <article class="panel form-panel">
+          <div class="panel-heading"><div><span class="eyebrow">MODELO LOCAL</span><h3>Inteligência artificial</h3></div><span class="tag tag-green">Gemma 3 1B</span></div>
+          <div class="form-grid">
+            <label class="field field-wide">Modelo<input type="text" value="Gemma 3 1B Instruct — GGUF Q4_K_M" disabled></label>
+            <label class="field">Temperatura <output id="temperatureOutput">0.7</output><input id="temperatureInput" type="range" min="0" max="2" step="0.1"></label>
+          </div>
+          <p class="hint">O modelo é baixado automaticamente na primeira execução. Depois disso, a inferência funciona sem internet.</p>
+        </article>
+        <article class="panel form-panel">
+          <div class="panel-heading"><div><span class="eyebrow">COMPORTAMENTO</span><h3>Chat</h3></div></div>
+          <label class="check-field"><input id="mentionInput" type="checkbox"><span>Responder somente quando mencionarem o nome do bot</span></label>
+        </article>
+        <div class="form-actions"><button class="button button-primary" id="saveButton">Salvar configurações</button><span id="saveFeedback" class="muted"></span></div>
+      </section>
+
+      <section class="page" id="page-console">
+        <div class="section-intro"><span class="eyebrow">DIAGNÓSTICO</span><h2>Console</h2><p>Mensagens do bot, conexão e execução da inteligência artificial.</p></div>
+        <article class="panel console-full-panel">
+          <div class="panel-heading"><div><span class="eyebrow">LOG EM TEMPO REAL</span><h3>Registros</h3></div><button class="button button-secondary button-small" id="clearLogsButton">Limpar logs</button></div>
+          <pre id="fullLogs" class="full-logs"></pre>
+        </article>
+        <div class="danger-zone"><div><strong>Encerrar aplicativo</strong><p>Fecha o ProtoBot e encerra o processo do bot.</p></div><button class="button button-danger" id="forceQuitButton">Forçar fechar</button></div>
+      </section>
+
+      <footer class="app-footer"><span>ProtoBot · Interface multiplataforma</span><span>O bot utiliza o protocolo Minecraft Java.</span></footer>
+    </main>
+  </div>
+  <script>
+    if (typeof qt !== "undefined" && typeof QWebChannel !== "undefined") {
+      new QWebChannel(qt.webChannelTransport, function(channel) {
+        window.protoBridge = channel.objects.bridge;
+        document.dispatchEvent(new Event("proto-bridge-ready"));
+      });
+    }
+  </script>
+</body>
+</html>
