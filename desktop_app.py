@@ -91,7 +91,7 @@ class BotWorkerThread(QThread):
         except BaseException as exc:
             try:
                 with LOG_PATH.open("a", encoding="utf-8") as output:
-                    output.write(f"[ANDROID] Falha no worker: {type(exc).__name__}: {exc}\\n")
+                    output.write(f"[ANDROID] Falha no worker: {type(exc).__name__}: {exc}\n")
             except OSError:
                 pass
 
@@ -197,6 +197,11 @@ class MainWindow(QMainWindow):
 
     def process_ui_commands(self, commands):
         self._polling_js = False
+        if isinstance(commands, str):
+            try:
+                commands = json.loads(commands)
+            except json.JSONDecodeError:
+                return
         if not isinstance(commands, (list, tuple)):
             return
         for command in commands[:30]:
@@ -330,7 +335,7 @@ class MainWindow(QMainWindow):
             LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             LOG_PATH.write_text("", encoding="utf-8")
             self.log_offset = 0
-            self.send_ui_event({"type":"log","text":"Logs limpos."})
+            self.send_ui_event({"type":"clearLogs"})
         except OSError as exc:
             self.send_ui_event({"type":"log","text":"[ERRO] Não foi possível limpar os logs: " + str(exc)})
 
