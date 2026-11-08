@@ -8,7 +8,12 @@ on:
     paths:
       - "main.py"
       - "desktop_app.py"
+      - "bot.py"
+      - "local_llm.py"
+      - "interface_bundle.py"
       - "interface/**"
+      - "config.json"
+      - "requirements.txt"
       - "android/**"
       - ".github/workflows/android-apk.yml"
 
