@@ -1,16 +1,15 @@
 (function () {
   "use strict";
-  let bridge = null;
   let logs = [];
   let currentState = {running:false,paused:false};
 
   const byId = id => document.getElementById(id);
   const call = (name, ...args) => {
-    if (!bridge || typeof bridge[name] !== "function") {
+    if (!window.protoNative || typeof window.protoNative.invoke !== "function") {
       appendLog("[UI] A comunicação com o aplicativo ainda não está disponível.");
       return;
     }
-    bridge[name](...args);
+    window.protoNative.invoke(name,args);
   };
 
   function appendLog(line) {
@@ -31,10 +30,17 @@
   function setState(running, paused) {
     currentState = {running:!!running,paused:!!paused};
     const label = !running ? "Parado" : paused ? "Pausado" : "Em execução";
-    ["statusText","sideStatus"].forEach(id => { if (byId(id)) byId(id).textContent = id === "sideStatus" ? (running ? label : "Bot desconectado") : label; });
-    ["statusDot","sideDot"].forEach(id => { if (byId(id)) byId(id).classList.toggle("running",!!running && !paused); });
+    ["statusText","sideStatus"].forEach(id => {
+      if (byId(id)) byId(id).textContent = id === "sideStatus" ? (running ? label : "Bot desconectado") : label;
+    });
+    ["statusDot","sideDot"].forEach(id => {
+      if (byId(id)) byId(id).classList.toggle("running",!!running && !paused);
+    });
     if (byId("startButton")) byId("startButton").disabled = !!running;
-    if (byId("pauseButton")) { byId("pauseButton").disabled = !running; byId("pauseButton").textContent = paused ? "▶ Retomar" : "Ⅱ Pausar"; }
+    if (byId("pauseButton")) {
+      byId("pauseButton").disabled = !running;
+      byId("pauseButton").textContent = paused ? "▶ Retomar" : "Ⅱ Pausar";
+    }
     if (byId("stopButton")) byId("stopButton").disabled = !running;
   }
 
@@ -77,6 +83,16 @@
     byId("pageTitle").textContent = titles[name] || "ProtoBot";
   }
 
+  function receiveEvent(event) {
+    if (!event || typeof event !== "object") return;
+    if (event.type === "log") appendLog(event.text);
+    else if (event.type === "state") setState(event.running,event.paused);
+    else if (event.type === "config") {
+      try { fillConfig(typeof event.value === "string" ? JSON.parse(event.value) : event.value); }
+      catch(e) { appendLog("[UI] Erro ao carregar configurações: " + e); }
+    }
+  }
+
   function init() {
     document.querySelectorAll(".nav-item").forEach(item => item.addEventListener("click",() => showPage(item.dataset.section)));
     document.querySelectorAll("[data-go]").forEach(item => item.addEventListener("click",() => showPage(item.dataset.go)));
@@ -84,22 +100,11 @@
     byId("pauseButton").addEventListener("click",() => call("togglePause"));
     byId("stopButton").addEventListener("click",() => call("stopBot"));
     byId("saveButton").addEventListener("click",() => call("saveConfig",collectConfig()));
-    byId("clearLogsButton").addEventListener("click",() => {logs=[];appendLog("Logs limpos.");call("clearLogs");});
+    byId("clearLogsButton").addEventListener("click",() => call("clearLogs"));
     byId("forceQuitButton").addEventListener("click",() => call("forceQuit"));
     byId("temperatureInput").addEventListener("input",() => byId("temperatureOutput").textContent = Number(byId("temperatureInput").value).toFixed(1));
-    if (window.protoBridge) attachBridge(window.protoBridge);
-    document.addEventListener("proto-bridge-ready",() => { if (window.protoBridge) attachBridge(window.protoBridge); });
-  }
-
-  function attachBridge(value) {
-    if (bridge === value) return;
-    bridge = value;
-    bridge.logLine.connect(appendLog);
-    bridge.stateChanged.connect(setState);
-    bridge.configLoaded.connect(json => {
-      try { fillConfig(JSON.parse(json)); } catch(e) { appendLog("[UI] Erro ao carregar configurações: " + e); }
-    });
-    bridge.requestInitialData();
+    document.addEventListener("proto-event",event => receiveEvent(event.detail));
+    call("requestInitialData");
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded",init);
