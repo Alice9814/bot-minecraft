@@ -1,5 +1,6 @@
 """Embedded local inference for the Minecraft bot (no Ollama service required)."""
 import os
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -33,7 +34,7 @@ class LocalGemma:
                         break
                     output.write(chunk)
                     downloaded += len(chunk)
-                    if total:
+                    if total and sys.stdout is not None:
                         print(f"[IA] Baixando modelo Gemma: {downloaded * 100 // total}%", flush=True)
             if partial.stat().st_size < 100_000_000:
                 raise RuntimeError("O arquivo do modelo baixado está incompleto.")
