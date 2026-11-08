@@ -494,6 +494,22 @@ class MainWindow(QMainWindow):
         self.tray.hide()
         QApplication.quit()
 
+    def application_state_changed(self, state):
+        if not IS_ANDROID:
+            return
+        if state == Qt.ApplicationState.ApplicationActive:
+            # Restore the control page when Android brings the app back.
+            self.show()
+            self.load_control_page()
+            self.read_log_file()
+            self.refresh_state(force=True)
+        elif state in (
+            Qt.ApplicationState.ApplicationHidden,
+            Qt.ApplicationState.ApplicationInactive,
+        ):
+            # Free WebView memory while the bot's Python worker remains alive.
+            self.unload_control_page()
+
     def closeEvent(self, event):
         if IS_ANDROID:
             # Android has no desktop tray. Closing the control window hides the
@@ -534,6 +550,7 @@ def run_gui():
     app.setApplicationName("ProtoBot")
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
+    app.applicationStateChanged.connect(window.application_state_changed)
     app.aboutToQuit.connect(window.stop_interface_server)
     window.show()
     sys.exit(app.exec())
