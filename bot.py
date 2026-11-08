@@ -49,7 +49,7 @@ def parse_action(answer):
     answer = str(answer or "").strip()
     max_length = int(BEHAVIOR.get("max_chat_length", 180))
 
-    # Gemma 270M sometimes answers naturally instead of following the JSON
+    # Gemma 3 1B sometimes answers naturally instead of following the JSON
     # instruction. Treat ordinary text as a chat reply rather than failing.
     if answer.startswith("```"):
         answer = re.sub(r"^\`\`\`(?:json)?\s*|\s*\`\`\`$", "", answer, flags=re.IGNORECASE).strip()
@@ -147,7 +147,7 @@ async def main_async():
     version = MC.get("version") or "26.2"
     log("[IA] Preparando Gemma 3 1B Instruct local. Na primeira execução o modelo (~806 MB) será baixado.")
     model = LocalGemma(Path(os.environ.get("MINEBOT_MODEL_DIR", str(CONFIG_PATH.parent / "models"))),
-                       float(AI.get("temperature", 0.3)))
+                       float(AI.get("temperature", 0.7)))
     await asyncio.to_thread(model.load)
     log("[IA] Gemma 3 1B carregado localmente; Ollama não é necessário.")
     bot = await connect(MC.get("host", "127.0.0.1"), port=int(MC.get("port", 25565)),
@@ -177,7 +177,7 @@ async def main_async():
                 answer = await asyncio.to_thread(model.generate, history[-9:])
                 action = parse_action(answer)
 
-                # O Gemma 270M pode ignorar a instrução e retornar "none".
+                # O Gemma 3 1B pode ignorar a instrução e retornar "none".
                 # Como chegamos aqui por causa de uma mensagem real de jogador,
                 # não deixamos pedidos diretos ao bot sem resposta.
                 if action["type"] == "none":
