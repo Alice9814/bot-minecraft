@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         self.config = self.load_config()
         self.web_server = None
         self.web_server_thread = None
+        self._control_page_loaded = False
 
         self.web_view = QWebView()
         container = QWidget.createWindowContainer(self.web_view, self)
@@ -141,7 +142,7 @@ class MainWindow(QMainWindow):
         else:
             try:
                 self.start_interface_server()
-                self.web_view.setUrl(QUrl(self.interface_url))
+                self.load_control_page()
             except OSError as exc:
                 QMessageBox.critical(self, "Erro ao iniciar interface", f"Não foi possível iniciar o servidor local da interface:\n{exc}")
 
@@ -166,6 +167,17 @@ class MainWindow(QMainWindow):
         self.web_server_thread.start()
         host, port = self.web_server.server_address
         self.interface_url = f"http://{host}:{port}/index.html"
+
+    def load_control_page(self):
+        if self.web_server is not None and not self._control_page_loaded:
+            self.web_view.setUrl(QUrl(self.interface_url))
+            self._control_page_loaded = True
+
+    def unload_control_page(self):
+        if self._control_page_loaded:
+            self.web_view.setUrl(QUrl("about:blank"))
+            self._control_page_loaded = False
+            self._polling_js = False
 
     def stop_interface_server(self):
         server = self.web_server
@@ -221,6 +233,8 @@ class MainWindow(QMainWindow):
         return self.process.state() != QProcess.ProcessState.NotRunning
 
     def send_ui_event(self, event):
+        if not self._control_page_loaded:
+            return
         try:
             payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
             script = "if(window.__protoReceive){window.__protoReceive(" + payload + ");}"
@@ -229,7 +243,7 @@ class MainWindow(QMainWindow):
             pass
 
     def poll_ui_commands(self):
-        if self._polling_js:
+        if not self._control_page_loaded or self._polling_js:
             return
         self._polling_js = True
         script = "window.__protoDrainCommands ? window.__protoDrainCommands() : []"
@@ -412,6 +426,7 @@ class MainWindow(QMainWindow):
             self.show_window()
 
     def show_window(self):
+        self.load_control_page()
         self.show()
         self.raise_()
         self.activateWindow()
@@ -448,6 +463,7 @@ class MainWindow(QMainWindow):
             return
         if self.tray.isVisible():
             event.ignore()
+            self.unload_control_page()
             self.hide()
             self.tray.showMessage(
                 "ProtoBot",
