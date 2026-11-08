@@ -249,7 +249,7 @@ async def eat_food_if_needed(bot):
     packet_id = bot.version.packets.serverbound_player_action
     sequence = getattr(bot, "_next_sequence", 0)
     bot._next_sequence = (sequence + 1) & 0x7FFFFFFF
-    release_payload = encode_varint(5) + (0).to_bytes(8, "big", signed=True) + b"\\x00" + encode_varint(sequence)
+    release_payload = encode_varint(5) + (0).to_bytes(8, "big", signed=True) + bytes([0]) + encode_varint(sequence)
     await bot.send_raw(packet_id, release_payload)
     return True
 
