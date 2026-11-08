@@ -3,7 +3,25 @@ from pathlib import Path
 from javascript import require, On, Once, AsyncTask, once
 
 ROOT = Path(__file__).resolve().parent
-CFG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+CONFIG_PATH = Path(os.environ.get("MINEBOT_CONFIG", str(ROOT / "config.json")))
+CONTROL_PATH = Path(os.environ.get("MINEBOT_CONTROL", str(ROOT / "bot-control.json")))
+CFG = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+PAUSED = threading.Event()
+STOPPED = threading.Event()
+
+def control_loop():
+    last = None
+    while not STOPPED.is_set():
+        try:
+            state = json.loads(CONTROL_PATH.read_text(encoding="utf-8"))
+            paused = bool(state.get("paused", False))
+            if paused != last:
+                (PAUSED.set if paused else PAUSED.clear)()
+                log("Bot pausado." if paused else "Bot ativo.")
+                last = paused
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.4)
 MC, OLLAMA, BEHAVIOR = CFG["minecraft"], CFG["ollama"], CFG.get("behavior", {})
 PROMPT = """Você controla um bot de Minecraft. Responda somente com uma ação JSON.
 Ações: {"type":"chat","text":"..."}, {"type":"follow","player":"nome"},
@@ -95,6 +113,7 @@ def perform(bot, movements, pf, action):
         bot.pathfinder.setGoal(pf.goals.GoalFollow(player.entity, 2), True)
 
 def main():
+    threading.Thread(target=control_loop, daemon=True).start()
     log("Inicializando Mineflayer pelo Python...")
     mineflayer = require("mineflayer")
     pf = require("mineflayer-pathfinder")
@@ -118,7 +137,7 @@ def main():
         bot.chat("Olá! Estou online e conectado ao Ollama.")
 
     def think(context):
-        if not ready["spawn"] or not busy.acquire(False):
+        if PAUSED.is_set() or not ready["spawn"] or not busy.acquire(False):
             return
         @AsyncTask(start=True)
         def worker(task):
@@ -169,7 +188,10 @@ def main():
         once(bot, "end")
     except KeyboardInterrupt:
         log("Encerrando bot...")
+        STOPPED.set()
         bot.quit()
+    finally:
+        STOPPED.set()
 
 if __name__ == "__main__":
     main()
