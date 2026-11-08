@@ -40,7 +40,7 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Verify runtime imports
         run: |
-          python -c "import protobot; import llama_cpp; from PySide6.QtWidgets import QApplication; from PySide6.QtWebEngineWidgets import QWebEngineView; from PySide6.QtWebChannel import QWebChannel; print('ProtoBot, llama.cpp and Qt WebEngine OK')"
+          python -c "import protobot; import llama_cpp; from PySide6.QtWidgets import QApplication; from PySide6.QtWebView import QWebView, QtWebView; print('ProtoBot, llama.cpp and Qt WebView OK')"
       - name: Build Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
