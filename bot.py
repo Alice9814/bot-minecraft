@@ -245,6 +245,12 @@ async def eat_food_if_needed(bot):
     await bot.use_item(hand="main_hand")
     log(f"[SOBREVIVÊNCIA] Comendo {item.identifier} (fome: {bot.player.food}/20).")
     await asyncio.sleep(1.7)
+    # Release the use action so the server finalizes food consumption.
+    packet_id = bot.version.packets.serverbound_player_action
+    sequence = getattr(bot, "_next_sequence", 0)
+    bot._next_sequence = (sequence + 1) & 0x7FFFFFFF
+    release_payload = encode_varint(5) + (0).to_bytes(8, "big", signed=True) + b"\\x00" + encode_varint(sequence)
+    await bot.send_raw(packet_id, release_payload)
     return True
 
 async def authenticate():
@@ -688,6 +694,8 @@ async def main_async():
         while not stopped.is_set() and not bot.closed.is_set():
             await asyncio.sleep(10.0)
             if paused or bot.closed.is_set() or stopped.is_set():
+                continue
+            if busy.locked():
                 continue
             if pending_chat_messages:
                 messages = list(pending_chat_messages)
