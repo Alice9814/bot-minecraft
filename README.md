@@ -1,55 +1,73 @@
 # Minecraft AI Bot — aplicativo desktop
 
-Aplicativo desktop em Python com Mineflayer e Ollama. A interface oferece configuração do servidor, configuração da IA, console e controle do bot pela bandeja do sistema.
+Aplicativo desktop para Minecraft Java com interface PySide6, protocolo implementado pelo ProtoBot e inteligência artificial local Gemma 3 270M. O usuário não precisa instalar Node.js, Mineflayer ou Ollama.
+
+## O que está incluído
+
+- Conexão Minecraft Java por ProtoBot, com suporte declarado para 26.2.
+- Modo offline e autenticação Microsoft (fluxo de código de dispositivo).
+- Modelo Gemma 3 270M Instruct em GGUF Q4_K_M, executado localmente por llama.cpp via llama-cpp-python.
+- Download automático do modelo na primeira inicialização (aproximadamente 253 MB); depois de baixado, a inferência funciona sem internet.
+- Temperatura configurável, console integrado e controles para iniciar, pausar e encerrar.
+- Bandeja do sistema. Fechar a janela minimiza o aplicativo quando a bandeja está disponível.
+
+## Primeira execução
+
+Na primeira inicialização, o aplicativo baixa o arquivo do modelo para a pasta de dados do usuário, dentro de `models`. É necessário ter internet durante esse primeiro download. O modelo não é baixado novamente se o arquivo local estiver íntegro.
+
+A inferência é executada no próprio processo do worker, sem servidor Ollama e sem enviar as mensagens do jogo para um serviço de IA externo. O modelo GGUF é a versão quantizada Q4_K_M do Gemma 3 270M Instruct; portanto, pertence à mesma família/modelo que usávamos, mas não é o mesmo arquivo binário do pacote Ollama.
+
+O modelo Gemma é distribuído sob os termos de uso do Google Gemma. Consulte os termos oficiais antes de redistribuir pesos ou criar uma distribuição modificada.
 
 ## Compatibilidade Minecraft
 
-- Minecraft Java 26.2: suporte de protocolo incluído pela distribuição compatível do Mineflayer (@wp2508/mineflayer) e seus pacotes Prismarine correspondentes.
-- Versões anteriores suportadas pela mesma distribuição continuam disponíveis.
-- A conexão automática detecta a versão do servidor. Normalmente, deixe o campo version do config.json como false para usar a detecção automática.
-- A compatibilidade de navegação/pathfinding ainda precisa ser validada em servidor 26.2; a conexão e as funções básicas usam o stack de protocolo e dados incluído no build.
+ProtoBot declara suporte ao protocolo Minecraft Java 26.2 e outras versões recentes. A integração foi feita usando sua API assíncrona: eventos de chat, envio de mensagens, estado do jogador e navegação. Isso não substitui testes de conexão e movimento em servidores reais; servidores com plugins, proxies ou anti-cheat podem se comportar de forma diferente.
 
-## Bandeja do sistema
+O campo de versão padrão está definido para 26.2. A autenticação offline funciona em servidores que permitem jogadores offline. Para servidores online-mode, selecione Microsoft e conclua a autorização pelo endereço e código exibidos no console integrado.
 
-- Fechar a janela minimiza o aplicativo para a bandeja, sem encerrar o bot.
-- O menu do ícone permite abrir a janela, pausar/retomar e encerrar o bot.
-- No Windows, o ícone aparece na área de notificação perto do relógio (pode estar dentro da seta ^).
-- No Linux, aparece na bandeja/área de notificação quando o ambiente gráfico e um serviço de StatusNotifier/AppIndicator oferecem suporte.
+## Bandeja e janelas de terminal
+
+- Fechar a janela minimiza para a bandeja, quando disponível.
+- No Windows, o processo auxiliar é iniciado com `CREATE_NO_WINDOW` para não abrir CMD/terminal.
+- No Linux, o aplicativo continua sendo compilado como janela gráfica (`--windowed`).
 
 ## Execução para desenvolvimento
 
-Requisitos atuais: Python 3.10+, Node.js 22+, Ollama instalado e servidor Minecraft acessível.
+Requisitos: Python 3.12+. O runtime de inferência e o cliente de protocolo são instalados pelo arquivo requirements.
 
 ```bash
 python -m pip install -r requirements.txt
-npm install "mineflayer@npm:@wp2508/mineflayer@4.42.7" "minecraft-data@npm:@wp2508/minecraft-data@3.111.7" mineflayer-pathfinder
-ollama pull gemma3:270m
 python desktop_app.py
 ```
 
-A janela permite configurar host, porta, nome, autenticação, modelo, URL da API e temperatura. O arquivo config.json é salvo ao clicar em "Salvar configurações" ou "Iniciar bot".
+A primeira execução baixa o modelo GGUF automaticamente. Não instale Ollama nem Node.js.
 
 ## Gerar os aplicativos
 
-O workflow .github/workflows/build.yml compila automaticamente uma pasta executável para Windows e Linux. Ele instala e verifica os dados do protocolo 26.2 antes de empacotar o aplicativo.
+O workflow `.github/workflows/build.yml` compila pastas executáveis para Windows e Linux. O pacote inclui ProtoBot, llama-cpp-python e as bibliotecas do PySide6. Os pesos do modelo são baixados na primeira execução para manter o artefato menor.
 
-Para executar manualmente, instale os requisitos e rode:
+Para executar manualmente o PyInstaller:
 
-```bash
-pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json:." --collect-all javascript --collect-all PySide6 desktop_app.py
+Windows:
+```powershell
+pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json;." --collect-all protobot --collect-all llama_cpp --collect-all PySide6 desktop_app.py
 ```
 
-No Windows, o separador de --add-data é ponto e vírgula (config.json;.); no Linux, dois-pontos (config.json:.).
+Linux:
+```bash
+pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json:." --collect-all protobot --collect-all llama_cpp --collect-all PySide6 desktop_app.py
+```
 
-## Limitação importante desta versão desktop
+## Limitações conhecidas
 
-O workflow de compilação inclui o runtime do Node.js e os pacotes Mineflayer dentro da pasta do aplicativo. O Ollama e os pesos do modelo Gemma ainda não estão incluídos: esta versão requer o Ollama instalado e o modelo baixado (ollama pull gemma3:270m). A etapa seguinte para torná-lo totalmente portátil é incorporar uma distribuição redistribuível do Ollama e os pesos do modelo, respeitando suas licenças e validando o pacote em cada sistema operacional.
+- A IA é reativa: analisa mensagens recebidas no chat; não fica executando raciocínio contínuo em segundo plano.
+- Gemma 3 270M é um modelo compacto. Pode interpretar mal instruções complexas ou produzir JSON inválido ocasionalmente.
+- A primeira execução exige internet para baixar os pesos. O runtime llama.cpp já faz parte do pacote do aplicativo.
+- A compatibilidade de protocolo anunciada pelo ProtoBot ainda precisa ser validada em cada tipo de servidor, proxy e configuração.
+- A bandeja do Linux depende do ambiente gráfico. Algumas sessões Wayland/GNOME podem exigir suporte adicional a AppIndicator.
 
-Drivers de GPU e componentes específicos do sistema também podem continuar sendo necessários para aceleração por hardware.
+## Segurança
 
-## Segurança e compatibilidade
-
-- Não publique senhas, tokens ou credenciais.
-- Mineflayer é voltado a servidores Minecraft Java.
-- O modelo gemma3:270m é compacto; sua capacidade de planejamento pode ser limitada.
-- A bandeja do Linux depende do ambiente gráfico. Algumas sessões Wayland/GNOME não exibem ícones de bandeja sem extensão compatível.
+- A sessão Microsoft é mantida na pasta de dados local do usuário; não compartilhe o arquivo de sessão.
+- Não publique tokens, credenciais ou arquivos de configuração que contenham dados privados.
+- O bot não deve receber permissões administrativas em servidores públicos sem avaliação cuidadosa.
