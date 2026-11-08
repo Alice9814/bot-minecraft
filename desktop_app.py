@@ -8,13 +8,15 @@ from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor, QFont
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox,
-    QDoubleSpinBox, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget, QMenu
+    QDoubleSpinBox, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget, QMenu, QStandardPaths
 )
 
 FROZEN = getattr(sys, "frozen", False)
 APP_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
-CONFIG_PATH = APP_DIR / "config.json"
-CONTROL_PATH = APP_DIR / "bot-control.json"
+USER_DATA_DIR = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation))
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_PATH = USER_DATA_DIR / "config.json"
+CONTROL_PATH = USER_DATA_DIR / "bot-control.json"
 
 
 def make_icon(color="#7cdb8a"):
@@ -222,10 +224,15 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def closeEvent(self, event):
-        event.ignore()
-        self.hide()
-        self.tray.showMessage("Minecraft AI Bot", "O aplicativo continua ativo na bandeja do sistema.",
-            QSystemTrayIcon.MessageIcon.Information, 2500)
+        if self.tray.isVisible():
+            event.ignore()
+            self.hide()
+            self.tray.showMessage("Minecraft AI Bot", "O aplicativo continua ativo na bandeja do sistema.",
+                QSystemTrayIcon.MessageIcon.Information, 2500)
+        else:
+            event.ignore()
+            QMessageBox.information(self, "Bandeja indisponível",
+                "Este ambiente não disponibilizou uma bandeja do sistema. Deixe a janela aberta para continuar usando o aplicativo.")
 
 
 def run_worker():
