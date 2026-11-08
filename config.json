@@ -1,0 +1,25 @@
+{
+  "minecraft": {
+    "host": "127.0.0.1",
+    "port": 25565,
+    "username": "OllamaBot",
+    "auth": "offline",
+    "version": false
+  },
+  "ollama": {
+    "url": "http://127.0.0.1:11434/api/chat",
+    "model": "gemma3:270m",
+    "timeout_seconds": 90,
+    "temperature": 0.3
+  },
+  "bridge": {
+    "host": "127.0.0.1",
+    "port": 8765
+  },
+  "behavior": {
+    "respond_only_when_mentioned": false,
+    "mention_name": "OllamaBot",
+    "think_interval_seconds": 8,
+    "max_chat_length": 180
+  }
+}
