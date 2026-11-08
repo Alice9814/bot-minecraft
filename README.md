@@ -4,9 +4,9 @@ Aplicativo multiplataforma para controlar um bot Minecraft Java com ProtoBot e i
 
 ## Interface multiplataforma
 
-A interface visual é escrita uma única vez em HTML, CSS e JavaScript, dentro de \`interface/\`. O desktop carrega os arquivos locais com Qt WebEngine e comunica a interface com o backend Python por Qt WebChannel. Não existe servidor HTTP local, endereço localhost para a interface ou navegador externo.
+A interface visual é escrita uma única vez em HTML, CSS e JavaScript, dentro de `interface/`. Os arquivos são carregados diretamente do armazenamento local por Qt WebView. Não existe servidor HTTP local, endereço localhost para a interface ou navegador externo.
 
-O Android usará os mesmos arquivos HTML/CSS/JS em uma WebView nativa, com uma ponte JavaScript nativa para o backend Python. O hospedeiro Android ainda está em desenvolvimento; a interface compartilhada e o hospedeiro desktop foram adicionados primeiro.
+O Qt WebView utiliza os componentes nativos disponíveis na plataforma: Android System WebView no Android e WebView2/Qt WebEngine no Windows; no Linux, utiliza Qt WebEngine. A comunicação entre JavaScript e Python é feita por uma fila local de comandos, sem WebSocket ou servidor web.
 
 ## O que está incluído
 
@@ -19,7 +19,7 @@ O Android usará os mesmos arquivos HTML/CSS/JS em uma WebView nativa, com uma p
 
 ## Primeira execução
 
-Na primeira inicialização, o aplicativo baixa o arquivo do modelo para a pasta de dados do usuário, dentro de \`models\`. É necessário ter internet durante esse primeiro download. O modelo não é baixado novamente se o arquivo local estiver íntegro.
+Na primeira inicialização, o aplicativo baixa o arquivo do modelo para a pasta de dados do usuário, dentro de `models`. É necessário ter internet durante esse primeiro download. O modelo não é baixado novamente se o arquivo local estiver íntegro.
 
 A inferência é executada localmente, sem servidor Ollama e sem enviar as mensagens do jogo para um serviço de IA externo. O modelo Gemma é distribuído sob os termos de uso do Google Gemma. Consulte os termos oficiais antes de redistribuir pesos ou criar uma distribuição modificada.
 
@@ -33,30 +33,32 @@ O campo de versão padrão está definido para 26.2. A autenticação offline fu
 
 Requisitos: Python 3.12+. Instale as dependências:
 
-\`\`\`bash
+```bash
 python -m pip install -r requirements.txt
 python desktop_app.py
-\`\`\`
+```
 
-O aplicativo usa PySide6, Qt WebEngine e Qt WebChannel para exibir a interface local e conectar o JavaScript ao Python. Não é necessário instalar Node.js, Mineflayer ou Ollama.
+O aplicativo usa PySide6 6.11+, Qt WebView e Qt Widgets. Não é necessário instalar Node.js, Mineflayer ou Ollama.
 
 ## Gerar os aplicativos desktop
 
-O workflow \`.github/workflows/build.yml\` compila pastas executáveis para Windows e Linux. Ele inclui os arquivos HTML e o runtime do ProtoBot/llama.cpp. Os pesos do modelo são baixados na primeira execução para manter o artefato menor.
+O workflow `.github/workflows/build.yml` compila pastas executáveis para Windows e Linux. Ele inclui os arquivos HTML e o runtime do ProtoBot/llama.cpp. Os pesos do modelo são baixados na primeira execução para manter o artefato menor.
 
 Windows:
-\`\`\`powershell
+```powershell
 pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json;." --add-data "interface;interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
-\`\`\`
+```
 
 Linux:
-\`\`\`bash
+```bash
 pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json:." --add-data "interface:interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
-\`\`\`
+```
 
 ## Android
 
-O objetivo é um APK independente: bot, conexão Minecraft e IA executados no próprio aparelho. A interface Android reutilizará os arquivos de \`interface/\`, sem servidor web local. A camada Android precisa integrar o runtime Python e compilar/fornecer as dependências nativas ARM64, especialmente llama.cpp. O APK ainda não está pronto.
+O ponto de entrada Android é `main.py`, que abre a mesma interface e o mesmo backend Python. O worker pode rodar em uma thread no Android, sem iniciar um processo Python separado. O Qt WebView usa o Android System WebView e carrega os arquivos locais.
+
+O APK ainda não está pronto para distribuição. É necessário compilar e integrar as dependências nativas para ARM64, principalmente llama.cpp/llama-cpp-python. Consulte `android/README.md` para o estado e o procedimento de preparação.
 
 ## Limitações conhecidas
 
