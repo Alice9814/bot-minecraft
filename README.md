@@ -9,6 +9,7 @@ Aplicativo desktop para Minecraft Java com interface PySide6, protocolo implemen
 - Modelo Gemma 3 1B Instruct em GGUF Q4_K_M, executado localmente por llama.cpp via llama-cpp-python.
 - Download automático do modelo na primeira inicialização (aproximadamente 806 MB); depois de baixado, a inferência funciona sem internet.
 - Temperatura configurável, console integrado e controles para iniciar, pausar e encerrar.
+- Respawn automático após a morte: detecta o evento de morte do próprio bot, solicita respawn e confirma o retorno, com até duas novas tentativas se necessário.
 - Bandeja do sistema. Fechar a janela minimiza o aplicativo quando a bandeja está disponível.
 
 ## Primeira execução
