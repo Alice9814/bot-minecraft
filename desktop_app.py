@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QStandardPaths, QUrl
+from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QStandardPaths, QUrl, QThread
 from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor, QFont
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QSystemTrayIcon, QMenu, QWidget
 from PySide6.QtWebView import QWebView, QtWebView
@@ -79,6 +79,23 @@ def make_icon(color="#7cdb8a"):
     return QIcon(pixmap)
 
 
+class BotWorkerThread(QThread):
+    def __init__(self, environment, parent=None):
+        super().__init__(parent)
+        self.environment = environment
+
+    def run(self):
+        os.environ.update(self.environment)
+        try:
+            run_worker()
+        except BaseException as exc:
+            try:
+                with LOG_PATH.open("a", encoding="utf-8") as output:
+                    output.write(f"[ANDROID] Falha no worker: {type(exc).__name__}: {exc}\\n")
+            except OSError:
+                pass
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -93,6 +110,7 @@ class MainWindow(QMainWindow):
         self.resize(1120, 780)
         self.setMinimumSize(650, 520)
         self.process = QProcess(self)
+        self.bot_thread = None
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self.process.finished.connect(self.process_finished)
         self.paused = False
@@ -158,6 +176,8 @@ class MainWindow(QMainWindow):
             self.send_ui_event({"type":"log","text":"AVISO: este ambiente não disponibilizou uma bandeja do sistema."})
 
     def is_bot_running(self):
+        if sys.platform == "android":
+            return self.bot_thread is not None and self.bot_thread.isRunning()
         return self.process.state() != QProcess.ProcessState.NotRunning
 
     def send_ui_event(self, event):
@@ -240,28 +260,37 @@ class MainWindow(QMainWindow):
             self.log_offset = 0
         except OSError as exc:
             self.send_ui_event({"type":"log","text":"[ERRO] Não foi possível limpar o log: " + str(exc)})
-        env = QProcessEnvironment.systemEnvironment()
-        env.insert("MINEBOT_CONFIG", str(CONFIG_PATH))
-        env.insert("MINEBOT_CONTROL", str(CONTROL_PATH))
-        env.insert("MINEBOT_LOG", str(LOG_PATH))
-        env.insert("PYTHONUNBUFFERED", "1")
-        env.insert("PYTHONIOENCODING", "utf-8")
-        env.insert("MINEBOT_MODEL_DIR", str(USER_DATA_DIR / "models"))
-        self.process.setProcessEnvironment(env)
-        if FROZEN:
-            self.process.start(sys.executable, ["--worker"])
+        environment = {
+            "MINEBOT_CONFIG": str(CONFIG_PATH),
+            "MINEBOT_CONTROL": str(CONTROL_PATH),
+            "MINEBOT_LOG": str(LOG_PATH),
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONIOENCODING": "utf-8",
+            "MINEBOT_MODEL_DIR": str(USER_DATA_DIR / "models")
+        }
+        if sys.platform == "android":
+            self.bot_thread = BotWorkerThread(environment, self)
+            self.bot_thread.finished.connect(self.android_worker_finished)
+            self.bot_thread.start()
         else:
-            worker_python = sys.executable
-            if sys.platform == "win32":
-                pythonw = Path(sys.executable).with_name("pythonw.exe")
-                if pythonw.exists():
-                    worker_python = str(pythonw)
-            self.process.start(worker_python, [str(APP_DIR / "bot.py")])
+            env = QProcessEnvironment.systemEnvironment()
+            for key, value in environment.items():
+                env.insert(key, value)
+            self.process.setProcessEnvironment(env)
+            if FROZEN:
+                self.process.start(sys.executable, ["--worker"])
+            else:
+                worker_python = sys.executable
+                if sys.platform == "win32":
+                    pythonw = Path(sys.executable).with_name("pythonw.exe")
+                    if pythonw.exists():
+                        worker_python = str(pythonw)
+                self.process.start(worker_python, [str(APP_DIR / "bot.py")])
         self.send_ui_event({"type":"log","text":"Solicitando inicialização do bot..."})
         self.refresh_state(force=True)
 
-    def save_control(self, paused):
-        CONTROL_PATH.write_text(json.dumps({"paused": bool(paused)}), encoding="utf-8")
+    def save_control(self, paused, stop=False):
+        CONTROL_PATH.write_text(json.dumps({"paused": bool(paused), "stop": bool(stop)}), encoding="utf-8")
 
     def toggle_pause(self):
         if not self.is_bot_running():
@@ -276,12 +305,24 @@ class MainWindow(QMainWindow):
         self.refresh_state(force=True)
 
     def stop_bot(self):
-        if self.is_bot_running():
+        if sys.platform == "android":
+            if self.is_bot_running():
+                self.save_control(False, stop=True)
+                if not self.bot_thread.wait(8000):
+                    self.send_ui_event({"type":"log","text":"O bot ainda está encerrando; aguarde alguns segundos."})
+                else:
+                    self.send_ui_event({"type":"log","text":"Bot encerrado."})
+        elif self.is_bot_running():
             self.process.terminate()
             if not self.process.waitForFinished(3000):
                 self.process.kill()
             self.send_ui_event({"type":"log","text":"Bot encerrado."})
         self.paused = False
+        self.refresh_state(force=True)
+
+    def android_worker_finished(self):
+        self.paused = False
+        self.send_ui_event({"type":"log","text":"Processo do bot finalizado."})
         self.refresh_state(force=True)
 
     def clear_logs(self):
