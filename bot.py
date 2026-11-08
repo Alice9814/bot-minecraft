@@ -346,6 +346,8 @@ async def swim_to(bot, x, y, z, *, timeout=60.0, tolerance=0.9):
                 )
                 if remaining > tolerance:
                     log("[NAVEGAÇÃO AQUÁTICA] Saiu da água; continuando por terra.")
+                    # Libera a reserva desta rotina para que navigate_to possa assumir.
+                    bot._navigation_claimed = False
                     await bot.navigate_to(
                         x, z, y=y, timeout=max(5.0, deadline - loop.time()),
                         max_nodes=8192, max_drop=5.0, replans=4
