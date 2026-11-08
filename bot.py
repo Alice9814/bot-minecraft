@@ -515,6 +515,10 @@ async def main_async():
         last = paused
         while not stopped.is_set():
             state = read_control()
+            if state.get("stop", False):
+                log("[BOT] Encerramento solicitado pelo aplicativo.")
+                stopped.set()
+                break
             paused = bool(state.get("paused", False))
             if paused != last:
                 log("Bot pausado." if paused else "Bot retomado.")
