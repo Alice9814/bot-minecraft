@@ -132,11 +132,8 @@ jobs:
           source_path = candidates[0]
           source = source_path.read_text(encoding="utf-8")
           target = "        self.update_config()"
-          injection = (
-              '        self.set_value("app", "android.extra_manifest_application_arguments", '
-              ''android:usesCleartextTraffic="true"', raise_warning=False)\\n'
-              + target
-          )
+          injection = """        self.set_value("app", "android.extra_manifest_application_arguments", 'android:usesCleartextTraffic="true"', raise_warning=False)
+          self.update_config()"""
           if "android:usesCleartextTraffic" not in source:
               if target not in source:
                   raise SystemExit("Could not find BuildozerConfig update point")
