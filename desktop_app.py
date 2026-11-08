@@ -97,12 +97,9 @@ class MainWindow(QMainWindow):
         self.resize(680, 650)
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        # No Windows console window for the background worker (including
-        # development runs where sys.executable is python.exe).
-        if sys.platform == "win32":
-            def hide_worker_console(arguments):
-                arguments.flags |= 0x08000000  # CREATE_NO_WINDOW
-            self.process.setCreateProcessArgumentsModifier(hide_worker_console)
+        # QProcess in some PySide6 builds does not expose
+        # setCreateProcessArgumentsModifier. The packaged app is already a
+        # GUI executable (--windowed); in development use pythonw.exe.
         self.process.readyReadStandardOutput.connect(self.read_output)
         self.process.finished.connect(self.process_finished)
         self.paused = False
@@ -235,9 +232,16 @@ class MainWindow(QMainWindow):
         env.insert("MINEBOT_MODEL_DIR", str(USER_DATA_DIR / "models"))
         self.process.setProcessEnvironment(env)
         if FROZEN:
+            # PyInstaller --windowed executable has no console subsystem.
             self.process.start(sys.executable, ["--worker"])
         else:
-            self.process.start(sys.executable, [str(APP_DIR / "bot.py")])
+            worker_python = sys.executable
+            if sys.platform == "win32":
+                # pythonw.exe starts the worker without opening a CMD window.
+                pythonw = Path(sys.executable).with_name("pythonw.exe")
+                if pythonw.exists():
+                    worker_python = str(pythonw)
+            self.process.start(worker_python, [str(APP_DIR / "bot.py")])
         self.console.append("Solicitando inicialização do bot...")
         self.refresh_state()
 
