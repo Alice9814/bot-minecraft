@@ -59,6 +59,9 @@ jobs:
           ANDROID_REQUIREMENTS="$(python -c 'import pathlib, PySide6; print(pathlib.Path(PySide6.__file__).parent / "scripts" / "requirements-android.txt")')"
           python -m pip install -r "$ANDROID_REQUIREMENTS"
 
+      - name: Validate Python source files
+        run: python -m py_compile main.py desktop_app.py bot.py local_llm.py interface_bundle.py
+
       - name: Download Android ARM64 Qt wheels
         shell: bash
         run: |
