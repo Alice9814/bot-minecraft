@@ -33,7 +33,7 @@ No Windows, o separador de `--add-data` é ponto e vírgula (`config.json;.`); n
 
 ## Limitação importante desta primeira versão desktop
 
-O empacotamento atual inclui o aplicativo Python e sua interface, mas ainda não distribui os runtimes externos do Node.js e do Ollama nem os pesos do modelo Gemma. Portanto, esta compilação inicial ainda requer esses componentes instalados no computador. A etapa de distribuição totalmente portátil precisa incorporar versões redistribuíveis do Node/Ollama e o modelo, respeitando suas licenças e validando os pacotes em cada sistema operacional.
+O workflow de compilação inclui o runtime do Node.js e os pacotes Mineflayer dentro da pasta do aplicativo. O Ollama e os pesos do modelo Gemma ainda não estão incluídos: esta versão requer o Ollama instalado e o modelo baixado (`ollama pull gemma3:270m`). A etapa seguinte para torná-lo totalmente portátil é incorporar uma distribuição redistribuível do Ollama e os pesos do modelo, respeitando suas licenças e validando o pacote em cada sistema operacional.
 
 Drivers de GPU e componentes específicos do sistema também podem continuar sendo necessários para aceleração por hardware.
 
