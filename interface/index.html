@@ -122,7 +122,7 @@
         }
       };
       window.__protoDrainCommands = function () {
-        return queue.splice(0, queue.length);
+        return JSON.stringify(queue.splice(0, queue.length));
       };
       window.__protoReceive = function (event) {
         document.dispatchEvent(new CustomEvent("proto-event", {detail: event}));
