@@ -133,11 +133,11 @@ HOSTILE_MOBS = {
 FOOD_ITEMS = {
     "apple", "golden_apple", "enchanted_golden_apple", "bread", "baked_potato",
     "carrot", "golden_carrot", "potato", "beetroot", "beetroot_soup",
-    "mushroom_stew", "rabbit_stew", "suspicious_stew", "cooked_beef",
+    "mushroom_stew", "rabbit_stew", "cooked_beef",
     "cooked_porkchop", "cooked_chicken", "cooked_mutton", "cooked_rabbit",
     "cooked_cod", "cooked_salmon", "beef", "porkchop", "chicken", "mutton",
-    "rabbit", "cod", "salmon", "tropical_fish", "pufferfish", "rotten_flesh",
-    "spider_eye", "cookie", "melon_slice", "pumpkin_pie", "sweet_berries",
+    "rabbit", "cod", "salmon", "tropical_fish",
+    "cookie", "melon_slice", "pumpkin_pie", "sweet_berries",
     "glow_berries", "dried_kelp", "chorus_fruit", "honey_bottle"
 }
 WEAPON_ITEMS = ("netherite_sword", "diamond_sword", "iron_sword", "stone_sword",
@@ -194,8 +194,8 @@ def world_state(bot, recent_events=None):
         "rotation": {"yaw": round(p.yaw, 1), "pitch": round(p.pitch, 1)},
         "on_ground": p.on_ground, "health": p.health, "food": p.food,
         "saturation": round(p.saturation, 1), "players": players,
-        "nearby_entities": nearby_entities[:40], "nearby_blocks": blocks[:70],
-        "inventory": inventory[:45], "recent_events": list(recent_events or [])[-60:]
+        "nearby_entities": nearby_entities[:25], "nearby_blocks": blocks[:45],
+        "inventory": inventory[:45], "recent_events": list(recent_events or [])[-30:]
     }
 
 def encode_varint(value):
@@ -329,7 +329,8 @@ async def main_async():
     await bot.send_message("Olá! Estou online com ProtoBot e IA local Gemma 3 1B.")
     history = [{"role": "system", "content": PROMPT}]
     unreachable_destinations = {}
-    event_buffer = deque(maxlen=100)
+    event_buffer = deque(maxlen=80)
+    last_entity_event = {}
     pending_chat_messages = deque(maxlen=20)
     last_auto_attack = 0.0
 
@@ -406,7 +407,11 @@ async def main_async():
 
     @bot.on("entity_move")
     async def on_entity_move(entity_id, entity):
+        now = time.monotonic()
+        if now - last_entity_event.get(entity_id, 0.0) < 3.0:
+            return
         if math.dist((entity.x, entity.y, entity.z), (bot.player.x, bot.player.y, bot.player.z)) <= 12:
+            last_entity_event[entity_id] = now
             record_event("entity_move", f"{entity_identifier(bot, entity)} id={entity_id} em {entity.x:.1f},{entity.y:.1f},{entity.z:.1f}")
 
     @bot.on("entities_remove")
