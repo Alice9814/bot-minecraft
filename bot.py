@@ -98,6 +98,13 @@ def parse_action(answer):
                 actions.append({"type": kind, **dict(zip(keys, values))})
         elif kind in ("stop", "jump"):
             actions.append({"type": kind})
+        elif kind == "attack":
+            try:
+                entity_id = int(item["entity_id"])
+                if entity_id >= 0:
+                    actions.append({"type": "attack", "entity_id": entity_id})
+            except (KeyError, TypeError, ValueError):
+                continue
         elif kind == "follow":
             player = str(item.get("player", "")).strip()
             if player:
@@ -280,6 +287,14 @@ async def perform(bot, action):
         await bot.tick(MovementInput())
     elif kind == "look":
         await bot.send_look(action["yaw"], max(-90.0, min(90.0, action["pitch"])))
+    elif kind == "attack":
+        target = bot.entities.get(int(action["entity_id"]))
+        if target is None or entity_identifier(bot, target).rsplit(":", 1)[-1] not in HOSTILE_MOBS:
+            raise ValueError("A entidade de ataque não está presente ou não é hostil.")
+        distance = math.dist((bot.player.x, bot.player.y, bot.player.z), (target.x, target.y, target.z))
+        if distance > 3.7:
+            raise ValueError("Alvo fora do alcance de ataque.")
+        await attack_entity(bot, target)
     elif kind == "move_to":
         p = bot.player
         x, y, z = action["x"], action["y"], action["z"]
@@ -308,6 +323,12 @@ async def main_async():
     await bot.send_message("Olá! Estou online com ProtoBot e IA local Gemma 3 1B.")
     history = [{"role": "system", "content": PROMPT}]
     unreachable_destinations = {}
+    event_buffer = deque(maxlen=100)
+    pending_chat_messages = deque(maxlen=20)
+    last_auto_attack = 0.0
+
+    def record_event(label, detail):
+        event_buffer.append({"time": time.strftime("%H:%M:%S"), "event": label, "detail": str(detail)[:240]})
     busy = asyncio.Lock()
     paused = bool(read_control().get("paused", False))
     stopped = asyncio.Event()
@@ -454,7 +475,7 @@ async def main_async():
                     "event": "chat",
                     "from": name,
                     "message": text_message,
-                    "world": world_state(bot),
+                    "world": world_state(bot, event_buffer),
                     "unreachable_destinations": list(unreachable_destinations.keys())
                 }
                 history.append({"role": "user", "content": json.dumps(context, ensure_ascii=False)})
@@ -505,7 +526,8 @@ async def main_async():
                     )
                     if entity is not None:
                         dx = entity.x - bot.player.x
-                        dy = (entity.y + 1.62) - (bot.player.y + 1.62)
+                        # Aim at the upper torso, not the eye line, to avoid over-aiming.
+                        dy = (entity.y + 1.25) - (bot.player.y + 1.62)
                         dz = entity.z - bot.player.z
                         horizontal = math.hypot(dx, dz)
                         action = {
@@ -599,9 +621,10 @@ async def main_async():
         mention = str(BEHAVIOR.get("mention_name", username))
         if BEHAVIOR.get("respond_only_when_mentioned", False) and mention.casefold() not in text_message.casefold():
             return
-        # Never hold ProtoBot's packet-reader task while the model thinks or
-        # while navigation is running. The handler returns immediately.
-        asyncio.create_task(process_player_message(name, text_message))
+        # Buffer chat until the next 10-second AI cycle so messages and world
+        # events are evaluated together instead of invoking the model per packet.
+        pending_chat_messages.append((name, text_message))
+        record_event("chat", f"{name}: {text_message}")
 
     async def physics_loop():
         log("[FISICA] Simulação contínua ativada (20 ticks por segundo).")
