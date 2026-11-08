@@ -1,0 +1,1 @@
+# Integração com Ollama usa apenas a biblioteca padrão do Python.
