@@ -3,12 +3,12 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QTimer
+from PySide6.QtCore import Qt, QProcess, QTimer, QStandardPaths
 from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor, QFont
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox,
-    QDoubleSpinBox, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget, QMenu, QStandardPaths
+    QDoubleSpinBox, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget, QMenu
 )
 
 FROZEN = getattr(sys, "frozen", False)
