@@ -317,7 +317,7 @@ async def main_async():
         task.add_done_callback(respawn_tasks.discard)
 
     async def process_player_message(name, text_message):
-        nonlocal history
+        nonlocal history, follow_task
         if paused or busy.locked():
             return
         async with busy:
@@ -356,9 +356,9 @@ async def main_async():
                     model_messages = [history[0], history[-1]]
 
                 normalized_message = normalize_text(text_message)
-                if re.search(r"\\b(pare|parar|parei) de me seguir\\b|\\bnao me siga\\b", normalized_message):
+                if re.search(r"\b(pare|parar|parei) de me seguir\b|\bnao me siga\b", normalized_message):
                     action = {"type": "stop"}
-                elif re.search(r"\\b(me siga|siga-me|me acompanha|venha comigo)\\b", normalized_message):
+                elif re.search(r"\b(me siga|siga-me|me acompanha|venha comigo)\b", normalized_message):
                     action = {"type": "follow", "player": name}
                 elif ("direcao aleatoria" in normalized_message or "lado aleatorio" in normalized_message
                       or "olhe aleatoriamente" in normalized_message):
