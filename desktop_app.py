@@ -377,7 +377,11 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def force_quit_app(self):
-        if self.is_bot_running():
+        if sys.platform == "android":
+            if self.is_bot_running():
+                self.save_control(False, stop=True)
+                self.bot_thread.wait(5000)
+        elif self.is_bot_running():
             self.process.kill()
             self.process.waitForFinished(2000)
         self.tray.hide()
