@@ -163,6 +163,8 @@ class MainWindow(QMainWindow):
         env.insert("MINEBOT_CONFIG", str(CONFIG_PATH))
         env.insert("MINEBOT_CONTROL", str(CONTROL_PATH))
         env.insert("PYTHONUNBUFFERED", "1")
+        env.insert("NODE_PATH", str(APP_DIR / "node_modules"))
+        env.insert("PATH", str(APP_DIR) + os.pathsep + env.value("PATH"))
         self.process.setProcessEnvironment(env)
         if FROZEN:
             self.process.start(sys.executable, ["--worker"])
@@ -245,6 +247,7 @@ if __name__ == "__main__":
         run_worker()
     else:
         app = QApplication(sys.argv)
+        app.setApplicationName("MinecraftAIBot")
         app.setQuitOnLastWindowClosed(False)
         window = MainWindow()
         window.show()
