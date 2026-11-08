@@ -97,6 +97,12 @@ class MainWindow(QMainWindow):
         self.resize(680, 650)
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        # No Windows console window for the background worker (including
+        # development runs where sys.executable is python.exe).
+        if sys.platform == "win32":
+            def hide_worker_console(arguments):
+                arguments.flags |= 0x08000000  # CREATE_NO_WINDOW
+            self.process.setCreateProcessArgumentsModifier(hide_worker_console)
         self.process.readyReadStandardOutput.connect(self.read_output)
         self.process.finished.connect(self.process_finished)
         self.paused = False
