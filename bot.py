@@ -386,6 +386,63 @@ async def main_async():
         finally:
             log(f"[BOT] Parei de seguir {player_name}.")
 
+    # Captura eventos próximos entre os ciclos de decisão. O buffer tem limite fixo.
+    @bot.on("block_update")
+    async def on_block_update(x, y, z, state_id):
+        if math.dist((x, y, z), (bot.player.x, bot.player.y, bot.player.z)) <= 12:
+            block = bot.world.block_states.get(state_id).name
+            record_event("block_update", f"{block} em {x},{y},{z}")
+
+    @bot.on("entity_add")
+    async def on_entity_add(entity):
+        if math.dist((entity.x, entity.y, entity.z), (bot.player.x, bot.player.y, bot.player.z)) <= 20:
+            record_event("entity_spawn", f"{entity_identifier(bot, entity)} id={entity.entity_id} em {entity.x:.1f},{entity.y:.1f},{entity.z:.1f}")
+
+    @bot.on("entity_move")
+    async def on_entity_move(entity_id, entity):
+        if math.dist((entity.x, entity.y, entity.z), (bot.player.x, bot.player.y, bot.player.z)) <= 12:
+            record_event("entity_move", f"{entity_identifier(bot, entity)} id={entity_id} em {entity.x:.1f},{entity.y:.1f},{entity.z:.1f}")
+
+    @bot.on("entities_remove")
+    async def on_entities_remove(entity_ids, removed):
+        for entity in removed:
+            record_event("entity_removed", f"{entity_identifier(bot, entity)} id={entity.entity_id}")
+
+    @bot.on("health")
+    async def on_health(health, food, saturation):
+        record_event("health_food", f"vida={health:.1f}/20 fome={food}/20 saturação={saturation:.1f}")
+
+    @bot.on("player_join")
+    async def on_player_join(entry):
+        record_event("player_join", entry.name or entry.uuid)
+
+    @bot.on("player_leave")
+    async def on_player_leave(entry):
+        record_event("player_leave", entry.name or entry.uuid)
+
+    @bot.on("system_chat")
+    async def on_system_chat(component, overlay):
+        record_event("system_chat", plain_text(component))
+
+    @bot.on("game_event")
+    async def on_game_event(event_id, value):
+        record_event("game_event", f"id={event_id} valor={value}")
+
+    @bot.on("inventory")
+    async def on_inventory(slot, item):
+        if item.count and item.identifier:
+            record_event("inventory", f"slot={slot} {item.identifier} x{item.count}")
+
+    @bot.on("effect_update")
+    async def on_effect_update(entity_id, effect_id, identifier, effect):
+        if entity_id == bot.session.entity_id:
+            record_event("effect", f"{identifier or effect_id} aplicado")
+
+    @bot.on("effect_remove")
+    async def on_effect_remove(entity_id, effect_id, identifier, removed):
+        if entity_id == bot.session.entity_id:
+            record_event("effect", f"{identifier or effect_id} removido")
+
     @bot.on("close")
     async def on_close(reason):
         log("[MINECRAFT] Conexão encerrada:", reason or bot.disconnect_reason or "sem motivo informado")
@@ -626,6 +683,76 @@ async def main_async():
         pending_chat_messages.append((name, text_message))
         record_event("chat", f"{name}: {text_message}")
 
+    async def autonomous_ai_loop():
+        log("[IA] Ciclo de observação iniciado: uma chamada a cada 10 segundos.")
+        while not stopped.is_set() and not bot.closed.is_set():
+            await asyncio.sleep(10.0)
+            if paused or bot.closed.is_set() or stopped.is_set():
+                continue
+            if pending_chat_messages:
+                messages = list(pending_chat_messages)
+                pending_chat_messages.clear()
+                latest_name = messages[-1][0]
+                combined = "\n".join(f"{player}: {message}" for player, message in messages)
+                await process_player_message(latest_name, combined)
+            else:
+                await process_player_message(
+                    "ambiente",
+                    "Ciclo autônomo de 10 segundos. Analise o estado do mundo, os blocos, mobs, jogadores e eventos recentes. Tome apenas uma ação útil se necessário; caso contrário retorne none."
+                )
+
+    async def survival_loop():
+        nonlocal last_auto_attack
+        log("[SOBREVIVÊNCIA] Defesa automática e alimentação ativadas.")
+        while not stopped.is_set() and not bot.closed.is_set():
+            if paused or not bot.world_ready.is_set() or bot.player.dead:
+                await asyncio.sleep(0.5)
+                continue
+            try:
+                if bot.player.food <= 10:
+                    await eat_food_if_needed(bot)
+                now = time.monotonic()
+                if now - last_auto_attack >= 0.75:
+                    threats = []
+                    for entity in bot.entities.values():
+                        mob_name = entity_identifier(bot, entity).rsplit(":", 1)[-1]
+                        if mob_name not in HOSTILE_MOBS:
+                            continue
+                        distance = math.dist((bot.player.x, bot.player.y, bot.player.z), (entity.x, entity.y, entity.z))
+                        if distance <= 3.6:
+                            threats.append((distance, entity, mob_name))
+                    if threats:
+                        threats.sort(key=lambda item: item[0])
+                        distance, target, mob_name = threats[0]
+                        if mob_name == "creeper" and distance < 3.0:
+                            dx, dz = bot.player.x-target.x, bot.player.z-target.z
+                            length = max(math.hypot(dx, dz), 0.001)
+                            retreat_x = bot.player.x + (dx/length)*5.0
+                            retreat_z = bot.player.z + (dz/length)*5.0
+                            log("[DEFESA] Creeper muito próximo; tentando recuar.")
+                            try:
+                                await bot.navigate_to(retreat_x, retreat_z, y=None, timeout=3, max_nodes=2048, max_drop=3.0, replans=2)
+                            except Exception:
+                                pass
+                        else:
+                            for slot in range(36, 45):
+                                item = bot.player.inventory.get(slot)
+                                if item and item.identifier and item.identifier.rsplit(":", 1)[-1] in WEAPON_ITEMS:
+                                    await bot.select_hotbar_slot(slot-36)
+                                    break
+                            yaw = math.degrees(math.atan2(-(target.x-bot.player.x), target.z-bot.player.z))
+                            dy = (target.y + 0.8) - (bot.player.y + 1.62)
+                            pitch = -math.degrees(math.atan2(dy, max(distance, 0.001)))
+                            await bot.send_look(yaw, pitch)
+                            await attack_entity(bot, target)
+                            log(f"[DEFESA] Atacando {mob_name} (distância {distance:.1f}, entidade {target.entity_id}).")
+                        last_auto_attack = now
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log("[SOBREVIVÊNCIA] Erro no ciclo automático:", type(exc).__name__, exc)
+            await asyncio.sleep(0.35)
+
     async def physics_loop():
         log("[FISICA] Simulação contínua ativada (20 ticks por segundo).")
         loop = asyncio.get_running_loop()
@@ -662,12 +789,16 @@ async def main_async():
 
     physics_task = asyncio.create_task(physics_loop())
     control_task = asyncio.create_task(control_loop())
+    ai_task = asyncio.create_task(autonomous_ai_loop())
+    survival_task = asyncio.create_task(survival_loop())
     try:
         await stopped.wait()
     finally:
         physics_task.cancel()
         control_task.cancel()
-        await asyncio.gather(physics_task, control_task, return_exceptions=True)
+        ai_task.cancel()
+        survival_task.cancel()
+        await asyncio.gather(physics_task, control_task, ai_task, survival_task, return_exceptions=True)
         if follow_task is not None:
             follow_task.cancel()
             await asyncio.gather(follow_task, return_exceptions=True)
