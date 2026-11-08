@@ -3,11 +3,10 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QStandardPaths, QObject, Signal, Slot, QUrl
+from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QStandardPaths, QUrl
 from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor, QFont
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QSystemTrayIcon, QMenu
-from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QSystemTrayIcon, QMenu, QWidget
+from PySide6.QtWebView import QWebView, QtWebView
 
 FROZEN = getattr(sys, "frozen", False)
 APP_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
@@ -55,6 +54,14 @@ CONTROL_PATH = None
 LOG_PATH = None
 
 
+def default_config():
+    return {
+        "minecraft": {"host": "127.0.0.1", "port": 25565, "username": "ProtoBot", "auth": "offline", "version": "26.2"},
+        "ai": {"model": "gemma-3-1b-it-Q4_K_M.gguf", "temperature": 0.7},
+        "behavior": {"respond_only_when_mentioned": False, "mention_name": "ProtoBot", "max_chat_length": 180}
+    }
+
+
 def make_icon(color="#7cdb8a"):
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -70,71 +77,6 @@ def make_icon(color="#7cdb8a"):
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "P")
     painter.end()
     return QIcon(pixmap)
-
-
-def default_config():
-    return {
-        "minecraft": {"host": "127.0.0.1", "port": 25565, "username": "ProtoBot", "auth": "offline", "version": "26.2"},
-        "ai": {"model": "gemma-3-1b-it-Q4_K_M.gguf", "temperature": 0.7},
-        "behavior": {"respond_only_when_mentioned": False, "mention_name": "ProtoBot", "max_chat_length": 180}
-    }
-
-
-class UiBridge(QObject):
-    logLine = Signal(str)
-    stateChanged = Signal(bool, bool)
-    configLoaded = Signal(str)
-
-    def __init__(self, window):
-        super().__init__(window)
-        self.window = window
-
-    @Slot()
-    def requestInitialData(self):
-        self.configLoaded.emit(json.dumps(self.window.config, ensure_ascii=False))
-        self.stateChanged.emit(self.window.is_bot_running(), self.window.paused)
-        self.window.read_log_file()
-
-    @Slot(str)
-    def saveConfig(self, raw_config):
-        try:
-            incoming = json.loads(raw_config)
-            config = default_config()
-            for section in config:
-                if isinstance(incoming.get(section), dict):
-                    config[section].update(incoming[section])
-            config["minecraft"]["port"] = max(1, min(65535, int(config["minecraft"]["port"])))
-            config["ai"]["temperature"] = max(0.0, min(2.0, float(config["ai"]["temperature"])))
-            if not config["minecraft"]["host"].strip():
-                raise ValueError("Informe o endereço do servidor.")
-            if not config["minecraft"]["username"].strip():
-                raise ValueError("Informe o nome do bot.")
-            self.window.config = config
-            CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            self.logLine.emit("Configurações salvas.")
-            self.configLoaded.emit(json.dumps(config, ensure_ascii=False))
-        except Exception as exc:
-            self.logLine.emit("[ERRO] Não foi possível salvar as configurações: " + str(exc))
-
-    @Slot()
-    def startBot(self):
-        self.window.start_bot()
-
-    @Slot()
-    def togglePause(self):
-        self.window.toggle_pause()
-
-    @Slot()
-    def stopBot(self):
-        self.window.stop_bot()
-
-    @Slot()
-    def clearLogs(self):
-        self.window.clear_logs()
-
-    @Slot()
-    def forceQuit(self):
-        self.window.force_quit_app()
 
 
 class MainWindow(QMainWindow):
@@ -155,26 +97,27 @@ class MainWindow(QMainWindow):
         self.process.finished.connect(self.process_finished)
         self.paused = False
         self.log_offset = 0
+        self._polling_js = False
+        self._last_state = None
         self.config = self.load_config()
 
-        self.web_view = QWebEngineView(self)
-        self.channel = QWebChannel(self.web_view.page())
-        self.bridge = UiBridge(self)
-        self.channel.registerObject("bridge", self.bridge)
-        self.web_view.page().setWebChannel(self.channel)
-        self.setCentralWidget(self.web_view)
+        self.web_view = QWebView()
+        container = QWidget.createWindowContainer(self.web_view, self)
+        container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCentralWidget(container)
 
         index_file = APP_DIR / "interface" / "index.html"
         if not index_file.exists():
             QMessageBox.critical(self, "Interface não encontrada", f"Não encontrei os arquivos HTML:\n{index_file}")
         else:
-            self.web_view.load(QUrl.fromLocalFile(str(index_file.resolve())))
+            self.web_view.setUrl(QUrl.fromLocalFile(str(index_file.resolve())))
 
         self.setup_tray()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.read_log_file)
         self.timer.timeout.connect(self.refresh_state)
-        self.timer.start(500)
+        self.timer.timeout.connect(self.poll_ui_commands)
+        self.timer.start(150)
 
     def load_config(self):
         config = default_config()
@@ -212,10 +155,81 @@ class MainWindow(QMainWindow):
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
         else:
-            self.bridge.logLine.emit("AVISO: este ambiente não disponibilizou uma bandeja do sistema.")
+            self.send_ui_event({"type":"log","text":"AVISO: este ambiente não disponibilizou uma bandeja do sistema."})
 
     def is_bot_running(self):
         return self.process.state() != QProcess.ProcessState.NotRunning
+
+    def send_ui_event(self, event):
+        try:
+            payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+            script = "if(window.__protoReceive){window.__protoReceive(" + payload + ");}"
+            self.web_view.runJavaScript(script, lambda _result: None)
+        except Exception:
+            pass
+
+    def poll_ui_commands(self):
+        if self._polling_js:
+            return
+        self._polling_js = True
+        script = "window.__protoDrainCommands ? window.__protoDrainCommands() : []"
+        self.web_view.runJavaScript(script, self.process_ui_commands)
+
+    def process_ui_commands(self, commands):
+        self._polling_js = False
+        if not isinstance(commands, (list, tuple)):
+            return
+        for command in commands[:30]:
+            if not isinstance(command, dict):
+                continue
+            method = str(command.get("method", ""))
+            args = command.get("args", [])
+            if not isinstance(args, (list, tuple)):
+                args = []
+            try:
+                self.dispatch_ui_command(method, list(args))
+            except Exception as exc:
+                self.send_ui_event({"type":"log","text":f"[UI] Erro em {method}: {type(exc).__name__}: {exc}"})
+
+    def dispatch_ui_command(self, method, args):
+        if method == "requestInitialData":
+            self.send_ui_event({"type":"config","value":self.config})
+            self.refresh_state(force=True)
+            self.read_log_file()
+        elif method == "saveConfig":
+            self.save_config(args[0] if args else "")
+        elif method == "startBot":
+            self.start_bot()
+        elif method == "togglePause":
+            self.toggle_pause()
+        elif method == "stopBot":
+            self.stop_bot()
+        elif method == "clearLogs":
+            self.clear_logs()
+        elif method == "forceQuit":
+            self.force_quit_app()
+
+    def save_config(self, raw_config):
+        try:
+            incoming = json.loads(raw_config)
+            config = default_config()
+            for section in config:
+                if isinstance(incoming.get(section), dict):
+                    config[section].update(incoming[section])
+            config["minecraft"]["host"] = str(config["minecraft"]["host"]).strip()
+            config["minecraft"]["username"] = str(config["minecraft"]["username"]).strip()
+            config["minecraft"]["port"] = max(1, min(65535, int(config["minecraft"]["port"])))
+            config["ai"]["temperature"] = max(0.0, min(2.0, float(config["ai"]["temperature"])))
+            if not config["minecraft"]["host"]:
+                raise ValueError("Informe o endereço do servidor.")
+            if not config["minecraft"]["username"]:
+                raise ValueError("Informe o nome do bot.")
+            self.config = config
+            CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            self.send_ui_event({"type":"log","text":"Configurações salvas."})
+            self.send_ui_event({"type":"config","value":self.config})
+        except Exception as exc:
+            self.send_ui_event({"type":"log","text":"[ERRO] Não foi possível salvar as configurações: " + str(exc)})
 
     def start_bot(self):
         if self.is_bot_running():
@@ -225,7 +239,7 @@ class MainWindow(QMainWindow):
             LOG_PATH.write_text("", encoding="utf-8")
             self.log_offset = 0
         except OSError as exc:
-            self.bridge.logLine.emit("[ERRO] Não foi possível limpar o log: " + str(exc))
+            self.send_ui_event({"type":"log","text":"[ERRO] Não foi possível limpar o log: " + str(exc)})
         env = QProcessEnvironment.systemEnvironment()
         env.insert("MINEBOT_CONFIG", str(CONFIG_PATH))
         env.insert("MINEBOT_CONTROL", str(CONTROL_PATH))
@@ -243,8 +257,8 @@ class MainWindow(QMainWindow):
                 if pythonw.exists():
                     worker_python = str(pythonw)
             self.process.start(worker_python, [str(APP_DIR / "bot.py")])
-        self.bridge.logLine.emit("Solicitando inicialização do bot...")
-        self.refresh_state()
+        self.send_ui_event({"type":"log","text":"Solicitando inicialização do bot..."})
+        self.refresh_state(force=True)
 
     def save_control(self, paused):
         CONTROL_PATH.write_text(json.dumps({"paused": bool(paused)}), encoding="utf-8")
@@ -256,28 +270,28 @@ class MainWindow(QMainWindow):
         try:
             self.save_control(self.paused)
         except OSError as exc:
-            self.bridge.logLine.emit("[ERRO] Não foi possível alterar o estado: " + str(exc))
+            self.send_ui_event({"type":"log","text":"[ERRO] Não foi possível alterar o estado: " + str(exc)})
             return
-        self.bridge.logLine.emit("Bot pausado." if self.paused else "Bot retomado.")
-        self.refresh_state()
+        self.send_ui_event({"type":"log","text":"Bot pausado." if self.paused else "Bot retomado."})
+        self.refresh_state(force=True)
 
     def stop_bot(self):
         if self.is_bot_running():
             self.process.terminate()
             if not self.process.waitForFinished(3000):
                 self.process.kill()
-            self.bridge.logLine.emit("Bot encerrado.")
+            self.send_ui_event({"type":"log","text":"Bot encerrado."})
         self.paused = False
-        self.refresh_state()
+        self.refresh_state(force=True)
 
     def clear_logs(self):
         try:
             LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             LOG_PATH.write_text("", encoding="utf-8")
             self.log_offset = 0
-            self.bridge.logLine.emit("Logs limpos.")
+            self.send_ui_event({"type":"log","text":"Logs limpos."})
         except OSError as exc:
-            self.bridge.logLine.emit("[ERRO] Não foi possível limpar os logs: " + str(exc))
+            self.send_ui_event({"type":"log","text":"[ERRO] Não foi possível limpar os logs: " + str(exc)})
 
     def read_log_file(self):
         if not LOG_PATH.exists():
@@ -289,20 +303,23 @@ class MainWindow(QMainWindow):
                 self.log_offset = source.tell()
             if new_text:
                 for line in new_text.splitlines():
-                    self.bridge.logLine.emit(line)
+                    self.send_ui_event({"type":"log","text":line})
         except OSError:
             pass
 
     def process_finished(self, code, status):
         self.paused = False
-        self.bridge.logLine.emit(f"Processo do bot finalizado (código {code}).")
-        self.refresh_state()
+        self.send_ui_event({"type":"log","text":f"Processo do bot finalizado (código {code})."})
+        self.refresh_state(force=True)
 
-    def refresh_state(self):
+    def refresh_state(self, force=False):
         running = self.is_bot_running()
         self.tray_pause.setText("Retomar bot" if self.paused else "Pausar bot")
         self.tray.setToolTip("ProtoBot — " + ("pausado" if self.paused else "em execução" if running else "parado"))
-        self.bridge.stateChanged.emit(running, self.paused)
+        state = (running, self.paused)
+        if force or state != self._last_state:
+            self._last_state = state
+            self.send_ui_event({"type":"state","running":running,"paused":self.paused})
 
     def tray_activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
@@ -349,14 +366,19 @@ def run_worker():
     bot.main()
 
 
+def run_gui():
+    QtWebView.initialize()
+    app = QApplication(sys.argv)
+    app.setOrganizationName("ProtoBot")
+    app.setApplicationName("ProtoBot")
+    app.setQuitOnLastWindowClosed(False)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
+
 if __name__ == "__main__":
     if "--worker" in sys.argv:
         run_worker()
     else:
-        app = QApplication(sys.argv)
-        app.setOrganizationName("ProtoBot")
-        app.setApplicationName("ProtoBot")
-        app.setQuitOnLastWindowClosed(False)
-        window = MainWindow()
-        window.show()
-        sys.exit(app.exec())
+        run_gui()
