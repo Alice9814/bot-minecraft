@@ -31,41 +31,25 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libegl1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Install Minecraft 26.2 compatible Mineflayer runtime
-        run: |
-          npm install --prefix runtime-deps "mineflayer@npm:@wp2508/mineflayer@4.42.7" "minecraft-data@npm:@wp2508/minecraft-data@3.111.7" mineflayer-pathfinder
-      - name: Verify Minecraft 26.2 protocol data
-        run: |
-          node -e "const mineflayer=require('./runtime-deps/node_modules/mineflayer'); const mcdata=require('./runtime-deps/node_modules/minecraft-data')('26.2'); if (!mineflayer.createBot || !mcdata || !mcdata.version) process.exit(1); console.log('Mineflayer 26.2 data OK:', mcdata.version.minecraftVersion, 'protocol', mcdata.version.version)"
+          sudo apt-get install -y build-essential cmake libxcb-cursor0 libxkbcommon-x11-0 libegl1
       - name: Install Python dependencies
+        env:
+          CMAKE_ARGS: "-DGGML_NATIVE=OFF"
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+      - name: Verify runtime imports
+        run: |
+          python -c "import protobot; import llama_cpp; from PySide6.QtWidgets import QApplication; print('ProtoBot', protobot.__version__, 'and llama.cpp runtime OK')"
       - name: Build Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json;." --collect-all javascript --collect-all PySide6 desktop_app.py
+          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json;." --collect-all protobot --collect-all llama_cpp --collect-all PySide6 desktop_app.py
       - name: Build Linux application
         if: runner.os == 'Linux'
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json:." --collect-all javascript --collect-all PySide6 desktop_app.py
-      - name: Bundle Node.js and Mineflayer packages (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Copy-Item runtime-deps/node_modules dist/MinecraftAIBot/node_modules -Recurse
-          Copy-Item (Get-Command node).Source dist/MinecraftAIBot/node.exe
-      - name: Bundle Node.js and Mineflayer packages (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          cp -a runtime-deps/node_modules dist/MinecraftAIBot/node_modules
-          cp "$(command -v node)" dist/MinecraftAIBot/node
-          chmod +x dist/MinecraftAIBot/node
+          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json:." --collect-all protobot --collect-all llama_cpp --collect-all PySide6 desktop_app.py
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
