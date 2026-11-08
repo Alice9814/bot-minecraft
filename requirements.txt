@@ -2,3 +2,4 @@ PySide6>=6.7,<7
 git+https://github.com/ImWuMie/mc-proto-bot.git@71fce9b6f177f3392705f43ae51f7485bb5868d7
 llama-cpp-python>=0.3.16
 pyinstaller>=6.10
+cryptography>=42.0.0
