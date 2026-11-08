@@ -1,53 +1,45 @@
-# Minecraft AI Bot — Python + Mineflayer + Ollama
+# Minecraft AI Bot — aplicativo desktop
 
-Bot de Minecraft escrito em Python. A conexão e o controle do Minecraft usam Mineflayer carregado pelo pacote Python javascript; não há arquivo .js no projeto.
+Aplicativo desktop em Python com Mineflayer e Ollama. A interface oferece configuração do servidor, configuração da IA, console e controle do bot pela bandeja do sistema.
 
-## Requisitos
+## Bandeja do sistema
 
-- Python 3.10 ou superior
-- Node.js 18 ou superior (usado internamente pelo pacote javascript)
-- Ollama instalado e em execução
-- Servidor Minecraft Java acessível pela máquina onde o bot será executado
+- Fechar a janela minimiza o aplicativo para a bandeja, sem encerrar o bot.
+- O menu do ícone permite abrir a janela, pausar/retomar e encerrar o bot.
+- No Windows, o ícone aparece na área de notificação perto do relógio (pode estar dentro da seta `^`).
+- No Linux, aparece na bandeja/área de notificação quando o ambiente gráfico e um serviço de StatusNotifier/AppIndicator oferecem suporte.
 
-## Instalação
+## Execução para desenvolvimento
 
-Na pasta do projeto, execute:
+Requisitos atuais: Python 3.10+, Node.js compatível com o pacote `javascript`, Ollama instalado e servidor Minecraft acessível.
 
 ```bash
 python -m pip install -r requirements.txt
 ollama pull gemma3:270m
+python desktop_app.py
 ```
 
-O pacote javascript permite importar bibliotecas Node diretamente do Python e gerencia o carregamento das dependências Mineflayer, mineflayer-pathfinder e minecraft-data.
+A janela permite configurar host, porta, nome, autenticação, modelo, URL da API e temperatura. O arquivo `config.json` é salvo ao clicar em "Salvar configurações" ou "Iniciar bot".
 
-## Configuração
+## Gerar os aplicativos
 
-Edite config.json:
-
-- minecraft.host: endereço do servidor.
-- minecraft.port: porta do servidor.
-- minecraft.username: nome do bot.
-- minecraft.auth: offline para servidores offline ou microsoft para autenticação Microsoft.
-- minecraft.version: false para detectar automaticamente.
-- ollama.url: endereço da API do Ollama.
-- ollama.model: modelo utilizado, por padrão gemma3:270m.
-- behavior.respond_only_when_mentioned: se true, só processa mensagens que mencionem o nome configurado.
-
-Não coloque senhas ou tokens neste repositório público.
-
-## Executar
-
-Com o servidor Minecraft e o Ollama em execução:
+O workflow `.github/workflows/build.yml` compila automaticamente uma pasta executável para Windows e Linux. Para executar manualmente, instale os requisitos e rode:
 
 ```bash
-python bot.py
+pyinstaller --noconfirm --clean --onedir --name MinecraftAIBot --add-data "config.json:." --collect-all javascript --collect-all PySide6 desktop_app.py
 ```
 
-O bot entra no servidor e usa o Ollama para interpretar mensagens do chat. Ele pode conversar, seguir jogadores visíveis, andar até coordenadas conhecidas, olhar em uma direção, pular e parar.
+No Windows, o separador de `--add-data` é ponto e vírgula (`config.json;.`); no Linux, dois-pontos (`config.json:.`).
 
-## Observações
+## Limitação importante desta primeira versão desktop
 
-- O bot funciona em servidores Minecraft Java compatíveis com Mineflayer.
-- O modelo recebe o estado do mundo junto com as mensagens para escolher uma ação.
-- Modelos pequenos podem interpretar pedidos de forma limitada.
-- Node.js continua sendo um requisito interno do Mineflayer, mas você não precisa criar, editar ou executar arquivos JavaScript.
+O empacotamento atual inclui o aplicativo Python e sua interface, mas ainda não distribui os runtimes externos do Node.js e do Ollama nem os pesos do modelo Gemma. Portanto, esta compilação inicial ainda requer esses componentes instalados no computador. A etapa de distribuição totalmente portátil precisa incorporar versões redistribuíveis do Node/Ollama e o modelo, respeitando suas licenças e validando os pacotes em cada sistema operacional.
+
+Drivers de GPU e componentes específicos do sistema também podem continuar sendo necessários para aceleração por hardware.
+
+## Segurança e compatibilidade
+
+- Não publique senhas, tokens ou credenciais.
+- Mineflayer é voltado a servidores Minecraft Java.
+- O modelo `gemma3:270m` é compacto; sua capacidade de planejamento pode ser limitada.
+- A bandeja do Linux depende do ambiente gráfico. Algumas sessões Wayland/GNOME não exibem ícones de bandeja sem extensão compatível.
