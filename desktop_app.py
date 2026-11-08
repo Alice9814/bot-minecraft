@@ -3,34 +3,26 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QTimer, QStandardPaths
+from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QStandardPaths, QObject, Signal, Slot, QUrl
 from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor, QFont
-from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox,
-    QDoubleSpinBox, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget, QMenu
-)
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QSystemTrayIcon, QMenu
+from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 FROZEN = getattr(sys, "frozen", False)
 APP_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 
 
 def prepare_user_data_dir():
-    # QStandardPaths precisa ser consultado depois de criar QApplication.
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
         candidates = [base / "MinecraftAIBot", Path.home() / "MinecraftAIBot"]
     else:
         xdg = os.environ.get("XDG_CONFIG_HOME")
-        if xdg and Path(xdg).is_absolute():
-            preferred = Path(xdg) / "MinecraftAIBot"
-        else:
-            preferred = Path.home() / ".config" / "MinecraftAIBot"
+        preferred = Path(xdg) / "MinecraftAIBot" if xdg and Path(xdg).is_absolute() else Path.home() / ".config" / "MinecraftAIBot"
         candidates = [preferred, Path.home() / ".local" / "share" / "MinecraftAIBot"]
         try:
-            qt_path = QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.AppConfigLocation
-            )
+            qt_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
             if qt_path:
                 candidates.insert(0, Path(qt_path))
         except Exception:
@@ -44,10 +36,9 @@ def prepare_user_data_dir():
             probe.write_text("ok", encoding="utf-8")
             probe.unlink()
             return candidate
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             last_error = exc
 
-    # Último recurso: diretório temporário específico do usuário, nunca a raiz.
     import tempfile
     suffix = str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", "user")
     fallback = Path(tempfile.gettempdir()) / f"MinecraftAIBot-{suffix}"
@@ -55,10 +46,7 @@ def prepare_user_data_dir():
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
     except OSError as exc:
-        raise RuntimeError(
-            f"Não foi possível criar uma pasta gravável para as configurações. "
-            f"Último erro: {last_error or exc}"
-        ) from exc
+        raise RuntimeError(f"Não foi possível criar uma pasta gravável. Último erro: {last_error or exc}") from exc
 
 
 USER_DATA_DIR = None
@@ -79,9 +67,74 @@ def make_icon(color="#7cdb8a"):
     painter.drawEllipse(17, 17, 30, 30)
     painter.setPen(QColor("white"))
     painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
-    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "AI")
+    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "P")
     painter.end()
     return QIcon(pixmap)
+
+
+def default_config():
+    return {
+        "minecraft": {"host": "127.0.0.1", "port": 25565, "username": "ProtoBot", "auth": "offline", "version": "26.2"},
+        "ai": {"model": "gemma-3-1b-it-Q4_K_M.gguf", "temperature": 0.7},
+        "behavior": {"respond_only_when_mentioned": False, "mention_name": "ProtoBot", "max_chat_length": 180}
+    }
+
+
+class UiBridge(QObject):
+    logLine = Signal(str)
+    stateChanged = Signal(bool, bool)
+    configLoaded = Signal(str)
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+
+    @Slot()
+    def requestInitialData(self):
+        self.configLoaded.emit(json.dumps(self.window.config, ensure_ascii=False))
+        self.stateChanged.emit(self.window.is_bot_running(), self.window.paused)
+        self.window.read_log_file()
+
+    @Slot(str)
+    def saveConfig(self, raw_config):
+        try:
+            incoming = json.loads(raw_config)
+            config = default_config()
+            for section in config:
+                if isinstance(incoming.get(section), dict):
+                    config[section].update(incoming[section])
+            config["minecraft"]["port"] = max(1, min(65535, int(config["minecraft"]["port"])))
+            config["ai"]["temperature"] = max(0.0, min(2.0, float(config["ai"]["temperature"])))
+            if not config["minecraft"]["host"].strip():
+                raise ValueError("Informe o endereço do servidor.")
+            if not config["minecraft"]["username"].strip():
+                raise ValueError("Informe o nome do bot.")
+            self.window.config = config
+            CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            self.logLine.emit("Configurações salvas.")
+            self.configLoaded.emit(json.dumps(config, ensure_ascii=False))
+        except Exception as exc:
+            self.logLine.emit("[ERRO] Não foi possível salvar as configurações: " + str(exc))
+
+    @Slot()
+    def startBot(self):
+        self.window.start_bot()
+
+    @Slot()
+    def togglePause(self):
+        self.window.toggle_pause()
+
+    @Slot()
+    def stopBot(self):
+        self.window.stop_bot()
+
+    @Slot()
+    def clearLogs(self):
+        self.window.clear_logs()
+
+    @Slot()
+    def forceQuit(self):
+        self.window.force_quit_app()
 
 
 class MainWindow(QMainWindow):
@@ -92,149 +145,88 @@ class MainWindow(QMainWindow):
         CONFIG_PATH = USER_DATA_DIR / "config.json"
         CONTROL_PATH = USER_DATA_DIR / "bot-control.json"
         LOG_PATH = USER_DATA_DIR / "bot.log"
-        self.setWindowTitle("Minecraft AI Bot")
+
+        self.setWindowTitle("ProtoBot — Minecraft AI")
         self.setWindowIcon(make_icon())
-        self.resize(680, 650)
+        self.resize(1120, 780)
+        self.setMinimumSize(650, 520)
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        # QProcess in some PySide6 builds does not expose
-        # setCreateProcessArgumentsModifier. The packaged app is already a
-        # GUI executable (--windowed); in development use pythonw.exe.
-        self.process.readyReadStandardOutput.connect(self.read_output)
         self.process.finished.connect(self.process_finished)
         self.paused = False
         self.log_offset = 0
         self.config = self.load_config()
-        self.build_ui()
+
+        self.web_view = QWebEngineView(self)
+        self.channel = QWebChannel(self.web_view.page())
+        self.bridge = UiBridge(self)
+        self.channel.registerObject("bridge", self.bridge)
+        self.web_view.page().setWebChannel(self.channel)
+        self.setCentralWidget(self.web_view)
+
+        index_file = APP_DIR / "interface" / "index.html"
+        if not index_file.exists():
+            QMessageBox.critical(self, "Interface não encontrada", f"Não encontrei os arquivos HTML:\n{index_file}")
+        else:
+            self.web_view.load(QUrl.fromLocalFile(str(index_file.resolve())))
+
         self.setup_tray()
-        self.refresh_state()
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.refresh_state)
         self.timer.timeout.connect(self.read_log_file)
-        self.timer.start(1000)
+        self.timer.timeout.connect(self.refresh_state)
+        self.timer.start(500)
 
     def load_config(self):
-        defaults = {
-            "minecraft": {"host": "127.0.0.1", "port": 25565, "username": "OllamaBot", "auth": "offline", "version": False},
-            "ai": {"model": "gemma-3-1b-it-Q4_K_M.gguf", "temperature": 0.7},
-            "behavior": {"respond_only_when_mentioned": False, "mention_name": "OllamaBot", "max_chat_length": 180}
-        }
+        config = default_config()
         try:
             if CONFIG_PATH.exists():
                 loaded = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-                for section in defaults:
-                    defaults[section].update(loaded.get(section, {}))
-                # Migrate settings from older Ollama-based releases.
+                for section in config:
+                    if isinstance(loaded.get(section), dict):
+                        config[section].update(loaded[section])
                 if "ai" not in loaded and "ollama" in loaded:
-                    defaults["ai"]["temperature"] = loaded["ollama"].get("temperature", 0.7)
+                    config["ai"]["temperature"] = loaded["ollama"].get("temperature", 0.7)
         except Exception as exc:
             QMessageBox.warning(self, "Configuração", f"Não foi possível ler config.json:\n{exc}")
-        return defaults
-
-    def build_ui(self):
-        root = QWidget()
-        layout = QVBoxLayout(root)
-        title = QLabel("Minecraft AI Bot")
-        title.setStyleSheet("font-size: 22px; font-weight: 700;")
-        subtitle = QLabel("Configure o servidor e a IA. Fechar esta janela mantém o bot na bandeja.")
-        subtitle.setWordWrap(True)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-
-        mc_box = QGroupBox("Servidor Minecraft")
-        mc = QFormLayout(mc_box)
-        self.host = QLineEdit(str(self.config["minecraft"].get("host", "127.0.0.1")))
-        self.port = QSpinBox(); self.port.setRange(1, 65535); self.port.setValue(int(self.config["minecraft"].get("port", 25565)))
-        self.username = QLineEdit(str(self.config["minecraft"].get("username", "OllamaBot")))
-        self.auth = QComboBox(); self.auth.addItems(["offline", "microsoft"])
-        self.auth.setCurrentText(str(self.config["minecraft"].get("auth", "offline")))
-        mc.addRow("Endereço:", self.host); mc.addRow("Porta:", self.port)
-        mc.addRow("Nome do bot:", self.username); mc.addRow("Autenticação:", self.auth)
-        layout.addWidget(mc_box)
-
-        ai_box = QGroupBox("Inteligência artificial — Gemma 3 1B Instruct (local)")
-        ai = QFormLayout(ai_box)
-        self.model = QLineEdit("Gemma 3 1B Instruct — GGUF Q4_K_M")
-        self.model.setReadOnly(True)
-        self.temperature = QDoubleSpinBox(); self.temperature.setRange(0, 2); self.temperature.setSingleStep(0.1)
-        self.temperature.setValue(float(self.config["ai"].get("temperature", 0.7)))
-        ai.addRow("Modelo:", self.model)
-        ai.addRow("Temperatura:", self.temperature)
-        ai.addRow(QLabel("O modelo (~806 MB) é baixado automaticamente na primeira execução e depois funciona offline."))
-        layout.addWidget(ai_box)
-
-        self.mention = QCheckBox("Responder somente quando mencionarem o nome do bot")
-        self.mention.setChecked(bool(self.config["behavior"].get("respond_only_when_mentioned", False)))
-        layout.addWidget(self.mention)
-
-        buttons = QHBoxLayout()
-        self.start_button = QPushButton("Iniciar bot")
-        self.pause_button = QPushButton("Pausar")
-        self.stop_button = QPushButton("Encerrar")
-        self.save_button = QPushButton("Salvar configurações")
-        self.force_quit_button = QPushButton("Forçar fechar aplicativo")
-        self.force_quit_button.setToolTip("Encerra o bot e fecha o aplicativo sem depender da bandeja do sistema.")
-        self.pause_button.setEnabled(False); self.stop_button.setEnabled(False)
-        self.start_button.clicked.connect(self.start_bot)
-        self.pause_button.clicked.connect(self.toggle_pause)
-        self.stop_button.clicked.connect(self.stop_bot)
-        self.save_button.clicked.connect(self.save_config)
-        self.force_quit_button.clicked.connect(self.force_quit_app)
-        for button in (self.start_button, self.pause_button, self.stop_button, self.save_button, self.force_quit_button):
-            buttons.addWidget(button)
-        layout.addLayout(buttons)
-
-        self.status = QLabel("Status: parado")
-        layout.addWidget(self.status)
-        console_header = QHBoxLayout()
-        console_header.addWidget(QLabel("Console"))
-        console_header.addStretch(1)
-        self.clear_logs_button = QPushButton("Limpar logs")
-        self.clear_logs_button.setToolTip("Limpa os registros exibidos e o arquivo de log atual.")
-        self.clear_logs_button.clicked.connect(self.clear_logs)
-        console_header.addWidget(self.clear_logs_button)
-        layout.addLayout(console_header)
-        self.console = QTextEdit(); self.console.setReadOnly(True)
-        layout.addWidget(self.console, 1)
-        self.setCentralWidget(root)
+        return config
 
     def setup_tray(self):
         self.tray = QSystemTrayIcon(make_icon(), self)
-        self.tray.setToolTip("Minecraft AI Bot — parado")
+        self.tray.setToolTip("ProtoBot — parado")
         menu = QMenu()
-        show_action = QAction("Abrir janela", self); show_action.triggered.connect(self.show_window)
-        self.tray_pause = QAction("Pausar bot", self); self.tray_pause.triggered.connect(self.toggle_pause)
-        stop_action = QAction("Encerrar bot", self); stop_action.triggered.connect(self.stop_bot)
-        quit_action = QAction("Sair do aplicativo", self); quit_action.triggered.connect(self.quit_app)
-        menu.addAction(show_action); menu.addAction(self.tray_pause)
-        menu.addAction(stop_action); menu.addSeparator(); menu.addAction(quit_action)
+        show_action = QAction("Abrir janela", self)
+        show_action.triggered.connect(self.show_window)
+        self.tray_pause = QAction("Pausar bot", self)
+        self.tray_pause.triggered.connect(self.toggle_pause)
+        stop_action = QAction("Encerrar bot", self)
+        stop_action.triggered.connect(self.stop_bot)
+        quit_action = QAction("Sair do aplicativo", self)
+        quit_action.triggered.connect(self.quit_app)
+        menu.addAction(show_action)
+        menu.addAction(self.tray_pause)
+        menu.addAction(stop_action)
+        menu.addSeparator()
+        menu.addAction(quit_action)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.tray_activated)
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
         else:
-            self.console.append("AVISO: este ambiente não disponibilizou uma bandeja do sistema.")
+            self.bridge.logLine.emit("AVISO: este ambiente não disponibilizou uma bandeja do sistema.")
 
-    def save_config(self):
-        self.config["minecraft"].update({"host": self.host.text().strip(), "port": self.port.value(),
-            "username": self.username.text().strip(), "auth": self.auth.currentText()})
-        self.config["ai"].update({"model": "gemma-3-1b-it-Q4_K_M.gguf",
-            "temperature": self.temperature.value()})
-        self.config["behavior"]["respond_only_when_mentioned"] = self.mention.isChecked()
-        try:
-            CONFIG_PATH.write_text(json.dumps(self.config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            self.console.append("Configurações salvas.")
-        except Exception as exc:
-            QMessageBox.critical(self, "Erro", f"Não foi possível salvar config.json:\n{exc}")
+    def is_bot_running(self):
+        return self.process.state() != QProcess.ProcessState.NotRunning
 
     def start_bot(self):
-        if self.process.state() != QProcess.ProcessState.NotRunning:
+        if self.is_bot_running():
             return
-        self.save_config()
-        CONTROL_PATH.write_text(json.dumps({"paused": False}), encoding="utf-8")
-        LOG_PATH.write_text("", encoding="utf-8")
-        self.log_offset = 0
-        env = self.process.processEnvironment()
+        self.save_control(False)
+        try:
+            LOG_PATH.write_text("", encoding="utf-8")
+            self.log_offset = 0
+        except OSError as exc:
+            self.bridge.logLine.emit("[ERRO] Não foi possível limpar o log: " + str(exc))
+        env = QProcessEnvironment.systemEnvironment()
         env.insert("MINEBOT_CONFIG", str(CONFIG_PATH))
         env.insert("MINEBOT_CONTROL", str(CONTROL_PATH))
         env.insert("MINEBOT_LOG", str(LOG_PATH))
@@ -243,60 +235,52 @@ class MainWindow(QMainWindow):
         env.insert("MINEBOT_MODEL_DIR", str(USER_DATA_DIR / "models"))
         self.process.setProcessEnvironment(env)
         if FROZEN:
-            # PyInstaller --windowed executable has no console subsystem.
             self.process.start(sys.executable, ["--worker"])
         else:
             worker_python = sys.executable
             if sys.platform == "win32":
-                # pythonw.exe starts the worker without opening a CMD window.
                 pythonw = Path(sys.executable).with_name("pythonw.exe")
                 if pythonw.exists():
                     worker_python = str(pythonw)
             self.process.start(worker_python, [str(APP_DIR / "bot.py")])
-        self.console.append("Solicitando inicialização do bot...")
+        self.bridge.logLine.emit("Solicitando inicialização do bot...")
         self.refresh_state()
 
+    def save_control(self, paused):
+        CONTROL_PATH.write_text(json.dumps({"paused": bool(paused)}), encoding="utf-8")
+
     def toggle_pause(self):
-        if self.process.state() == QProcess.ProcessState.NotRunning:
+        if not self.is_bot_running():
             return
         self.paused = not self.paused
-        CONTROL_PATH.write_text(json.dumps({"paused": self.paused}), encoding="utf-8")
-        self.pause_button.setText("Retomar" if self.paused else "Pausar")
-        self.tray_pause.setText("Retomar bot" if self.paused else "Pausar bot")
-        self.status.setText("Status: pausado" if self.paused else "Status: em execução")
-        self.console.append("Bot pausado." if self.paused else "Bot retomado.")
+        try:
+            self.save_control(self.paused)
+        except OSError as exc:
+            self.bridge.logLine.emit("[ERRO] Não foi possível alterar o estado: " + str(exc))
+            return
+        self.bridge.logLine.emit("Bot pausado." if self.paused else "Bot retomado.")
+        self.refresh_state()
 
     def stop_bot(self):
-        if self.process.state() != QProcess.ProcessState.NotRunning:
+        if self.is_bot_running():
             self.process.terminate()
             if not self.process.waitForFinished(3000):
                 self.process.kill()
-            self.console.append("Bot encerrado.")
+            self.bridge.logLine.emit("Bot encerrado.")
+        self.paused = False
+        self.refresh_state()
 
     def clear_logs(self):
-        """Limpa a tela e o arquivo de log sem parar o bot."""
-        self.console.clear()
         try:
             LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             LOG_PATH.write_text("", encoding="utf-8")
             self.log_offset = 0
-            # Descarta qualquer saída antiga ainda armazenada pelo QProcess.
-            self.process.readAllStandardOutput()
+            self.bridge.logLine.emit("Logs limpos.")
         except OSError as exc:
-            QMessageBox.warning(self, "Limpar logs", f"Não foi possível limpar o arquivo de log:\n{exc}")
-
-    def read_output(self):
-        data = bytes(self.process.readAllStandardOutput())
-        # No executável empacotado, a fonte oficial é bot.log (UTF-8).
-        # O worker também escreve no stdout; mostrar ambos duplicaria cada linha.
-        if FROZEN:
-            return
-        text = data.decode("utf-8", errors="replace")
-        if text:
-            self.console.append(text.rstrip())
+            self.bridge.logLine.emit("[ERRO] Não foi possível limpar os logs: " + str(exc))
 
     def read_log_file(self):
-        if not FROZEN or not LOG_PATH.exists():
+        if not LOG_PATH.exists():
             return
         try:
             with LOG_PATH.open("r", encoding="utf-8", errors="replace") as source:
@@ -304,34 +288,30 @@ class MainWindow(QMainWindow):
                 new_text = source.read()
                 self.log_offset = source.tell()
             if new_text:
-                self.console.append(new_text.rstrip())
+                for line in new_text.splitlines():
+                    self.bridge.logLine.emit(line)
         except OSError:
             pass
 
     def process_finished(self, code, status):
         self.paused = False
+        self.bridge.logLine.emit(f"Processo do bot finalizado (código {code}).")
         self.refresh_state()
-        self.console.append(f"Processo do bot finalizado (código {code}).")
 
     def refresh_state(self):
-        running = self.process.state() != QProcess.ProcessState.NotRunning
-        self.start_button.setEnabled(not running)
-        self.pause_button.setEnabled(running)
-        self.stop_button.setEnabled(running)
-        if not running:
-            self.status.setText("Status: parado")
-            self.tray.setToolTip("Minecraft AI Bot — parado")
-        else:
-            state = "pausado" if self.paused else "em execução"
-            self.status.setText(f"Status: {state}")
-            self.tray.setToolTip(f"Minecraft AI Bot — {state}")
+        running = self.is_bot_running()
+        self.tray_pause.setText("Retomar bot" if self.paused else "Pausar bot")
+        self.tray.setToolTip("ProtoBot — " + ("pausado" if self.paused else "em execução" if running else "parado"))
+        self.bridge.stateChanged.emit(running, self.paused)
 
     def tray_activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.show_window()
 
     def show_window(self):
-        self.show(); self.raise_(); self.activateWindow()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def quit_app(self):
         self.stop_bot()
@@ -339,9 +319,7 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def force_quit_app(self):
-        """Fecha o aplicativo mesmo quando a bandeja do sistema está com problemas."""
-        self.console.append("Forçando o encerramento do aplicativo...")
-        if self.process.state() != QProcess.ProcessState.NotRunning:
+        if self.is_bot_running():
             self.process.kill()
             self.process.waitForFinished(2000)
         self.tray.hide()
@@ -351,12 +329,19 @@ class MainWindow(QMainWindow):
         if self.tray.isVisible():
             event.ignore()
             self.hide()
-            self.tray.showMessage("Minecraft AI Bot", "O aplicativo continua ativo na bandeja do sistema.",
-                QSystemTrayIcon.MessageIcon.Information, 2500)
+            self.tray.showMessage(
+                "ProtoBot",
+                "O aplicativo continua ativo na bandeja do sistema.",
+                QSystemTrayIcon.MessageIcon.Information,
+                2500
+            )
         else:
             event.ignore()
-            QMessageBox.information(self, "Bandeja indisponível",
-                "Este ambiente não disponibilizou uma bandeja do sistema. Deixe a janela aberta para continuar usando o aplicativo.")
+            QMessageBox.information(
+                self,
+                "Bandeja indisponível",
+                "Este ambiente não disponibilizou uma bandeja do sistema. Use o botão 'Forçar fechar' no aplicativo."
+            )
 
 
 def run_worker():
@@ -369,8 +354,8 @@ if __name__ == "__main__":
         run_worker()
     else:
         app = QApplication(sys.argv)
-        app.setOrganizationName("MinecraftAIBot")
-        app.setApplicationName("MinecraftAIBot")
+        app.setOrganizationName("ProtoBot")
+        app.setApplicationName("ProtoBot")
         app.setQuitOnLastWindowClosed(False)
         window = MainWindow()
         window.show()
