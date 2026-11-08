@@ -3,6 +3,8 @@ name: Build desktop applications
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -30,6 +32,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libegl1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Mineflayer runtime dependencies
+        run: |
+          npm install --prefix runtime-deps mineflayer mineflayer-pathfinder minecraft-data
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -43,6 +51,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pyinstaller --noconfirm --clean --onedir --name MinecraftAIBot --add-data "config.json:." --collect-all javascript --collect-all PySide6 desktop_app.py
+      - name: Bundle Node.js and Mineflayer packages (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item runtime-deps/node_modules dist/MinecraftAIBot/node_modules -Recurse
+          Copy-Item (Get-Command node).Source dist/MinecraftAIBot/node.exe
+      - name: Bundle Node.js and Mineflayer packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cp -a runtime-deps/node_modules dist/MinecraftAIBot/node_modules
+          cp "$(command -v node)" dist/MinecraftAIBot/node
+          chmod +x dist/MinecraftAIBot/node
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
