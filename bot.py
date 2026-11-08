@@ -30,7 +30,7 @@ AÇÕES: chat(text); move_to(x,y,z) para coordenadas conhecidas; look(yaw,pitch)
 
 SOBREVIVÊNCIA: sua prioridade é permanecer vivo. O programa come automaticamente quando a fome chega a 10/20 ou menos e há comida. O programa ataca automaticamente mobs hostis próximos. Se um creeper estiver muito próximo, o programa tenta recuar. Não ataque jogadores nem animais passivos. Com pouca vida, evite lutas desnecessárias.
 
-AMBIENTE: você recebe posição, dimensão, rotação, vida, fome, saturação, estado no chão, blocos próximos com coordenadas, mobs e entidades próximas com IDs/distâncias, jogadores, inventário/equipamento e eventos recentes. Eventos incluem blocos alterados, entidades surgindo/movendo/desaparecendo, chat, dano, vida/fome, efeitos e respawn. Trate esses dados como observações reais; dado ausente é desconhecido.
+AMBIENTE: você recebe posição, dimensão, rotação, vida, fome, saturação, estado no chão, estado de água/natação, velocidade atual, blocos próximos com coordenadas, mobs e entidades próximas com IDs/distâncias, jogadores, inventário/equipamento e eventos recentes. Se estiver na água, o programa usa navegação aquática 3D para subir, descer e avançar; não tente compensar a física com coordenadas inventadas. Eventos incluem blocos alterados, entidades surgindo/movendo/desaparecendo, chat, dano, vida/fome, efeitos e respawn. Trate esses dados como observações reais; dado ausente é desconhecido.
 
 CICLO: a IA é consultada a cada 10 segundos. Avalie os eventos acumulados e o estado atual. Não repita ações sem progresso. Só use coordenadas presentes no estado ou fornecidas por jogadores. Nunca invente nomes, IDs, coordenadas, blocos, itens, acontecimentos ou capacidades.
 
@@ -192,7 +192,17 @@ def world_state(bot, recent_events=None):
         "dimension": bot.session.dimension_name,
         "position": {"x": round(p.x, 1), "y": round(p.y, 1), "z": round(p.z, 1)},
         "rotation": {"yaw": round(p.yaw, 1), "pitch": round(p.pitch, 1)},
-        "on_ground": p.on_ground, "health": p.health, "food": p.food,
+        "on_ground": p.on_ground,
+        "in_water": bot.physics_state.in_water,
+        "swimming": bot.physics_state.swimming,
+        "eye_in_water": bot.physics_state.eye_in_water,
+        "water_height": round(bot.physics_state.water_height, 2),
+        "velocity": {
+            "x": round(bot.physics_state.velocity.x, 3),
+            "y": round(bot.physics_state.velocity.y, 3),
+            "z": round(bot.physics_state.velocity.z, 3)
+        },
+        "health": p.health, "food": p.food,
         "saturation": round(p.saturation, 1), "players": players,
         "nearby_entities": nearby_entities[:25], "nearby_blocks": blocks[:45],
         "inventory": inventory[:45],
@@ -277,6 +287,78 @@ async def authenticate():
     return {"username": profile.name, "access_token": profile.access_token, "profile_uuid": str(profile.id),
             "refresh_token": profile.refresh_token, "expires_at": profile.expires_at, "cache": cache}
 
+async def swim_to(bot, x, y, z, *, timeout=60.0, tolerance=0.9):
+    """Navigate through water with 3D steering and the vanilla swimming physics."""
+    state = bot.physics_state
+    if not state.in_water:
+        raise RuntimeError("O bot não está na água; não é necessário usar navegação aquática.")
+
+    if bot._navigation_claimed:
+        raise RuntimeError("Outra navegação já está em andamento.")
+
+    bot._navigation_claimed = True
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    last_log = 0.0
+    try:
+        log(f"[NAVEGAÇÃO AQUÁTICA] Indo para ({x:.1f}, {y:.1f}, {z:.1f}).")
+        while loop.time() < deadline:
+            state = bot.physics_state
+            dx = x - state.position.x
+            dy = y - state.position.y
+            dz = z - state.position.z
+            horizontal = math.hypot(dx, dz)
+            distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            if distance <= tolerance:
+                await bot.tick(MovementInput(), _navigation_tick=True)
+                log("[NAVEGAÇÃO AQUÁTICA] Destino alcançado.")
+                return state
+
+            # A orientação vertical controla a subida/descida na natação.
+            yaw = math.degrees(math.atan2(-dx, dz)) if horizontal > 1.0e-4 else state.yaw
+            pitch = -math.degrees(math.atan2(dy, max(horizontal, 1.0e-4)))
+            pitch = max(-85.0, min(85.0, pitch))
+            await bot.send_look(yaw, pitch)
+
+            # Jump ajuda a ganhar altura; olhar para baixo orienta a descida.
+            # Sprint ativa a natação quando a cabeça está submersa.
+            controls = MovementInput(
+                forward=1.0 if horizontal > 0.25 else 0.0,
+                jump=dy > 0.45,
+                sprint=True
+            )
+            await bot.tick(controls, _navigation_tick=True)
+
+            now = loop.time()
+            if now - last_log >= 3.0:
+                log(
+                    f"[NAVEGAÇÃO AQUÁTICA] Distância: {distance:.1f} blocos; "
+                    f"posição: ({state.position.x:.1f}, {state.position.y:.1f}, {state.position.z:.1f}); "
+                    f"submerso: {state.eye_in_water}."
+                )
+                last_log = now
+
+            # Se saiu da água, a parte restante pode ser concluída pela navegação terrestre.
+            if not bot.physics_state.in_water:
+                remaining = math.dist(
+                    (bot.player.x, bot.player.y, bot.player.z), (x, y, z)
+                )
+                if remaining > tolerance:
+                    log("[NAVEGAÇÃO AQUÁTICA] Saiu da água; continuando por terra.")
+                    await bot.navigate_to(
+                        x, z, y=y, timeout=max(5.0, deadline - loop.time()),
+                        max_nodes=8192, max_drop=5.0, replans=4
+                    )
+                return bot.physics_state
+
+            await asyncio.sleep(0.05)
+
+        raise asyncio.TimeoutError("A navegação aquática excedeu o tempo limite.")
+    finally:
+        bot._navigation_claimed = False
+
+
 async def perform(bot, action):
     kind = action["type"]
     if kind == "sequence":
@@ -308,10 +390,13 @@ async def perform(bot, action):
         x, y, z = action["x"], action["y"], action["z"]
         if abs(x-p.x) > 100 or abs(y-p.y) > 50 or abs(z-p.z) > 100:
             raise ValueError("Destino muito distante (limite: 100 blocos).")
-        await bot.navigate_to(
-            x, z, y=y, timeout=60,
-            max_nodes=8192, max_drop=5.0, replans=5
-        )
+        if bot.physics_state.in_water:
+            await swim_to(bot, x, y, z, timeout=60.0)
+        else:
+            await bot.navigate_to(
+                x, z, y=y, timeout=60,
+                max_nodes=8192, max_drop=5.0, replans=5
+            )
 
 async def main_async():
     log("Inicializando ProtoBot (Minecraft Java 26.2)...")
@@ -379,10 +464,16 @@ async def main_async():
                     else:
                         target_x, target_z = entity.x + 1.5, entity.z
                     try:
-                        await bot.navigate_to(
-                            target_x, target_z, y=None, timeout=8,
-                            max_nodes=8192, max_drop=5.0, replans=5
-                        )
+                        if bot.physics_state.in_water:
+                            await swim_to(
+                                bot, target_x, entity.y + 0.8, target_z,
+                                timeout=8.0, tolerance=1.5
+                            )
+                        else:
+                            await bot.navigate_to(
+                                target_x, target_z, y=None, timeout=8,
+                                max_nodes=8192, max_drop=5.0, replans=5
+                            )
                     except asyncio.TimeoutError:
                         pass
                     except asyncio.CancelledError:
