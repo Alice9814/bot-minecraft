@@ -726,16 +726,20 @@ async def main_async():
 
     async def survival_loop():
         nonlocal last_auto_attack
+        last_food_attempt = 0.0
         log("[SOBREVIVÊNCIA] Defesa automática e alimentação ativadas.")
+        if bot.version.protocol < 776:
+            log("[DEFESA] Ataque automático exige protocolo 776 (Minecraft 26.2); alimentação continua disponível.")
         while not stopped.is_set() and not bot.closed.is_set():
             if paused or not bot.world_ready.is_set() or bot.player.dead:
                 await asyncio.sleep(0.5)
                 continue
             try:
-                if bot.player.food <= 10:
-                    await eat_food_if_needed(bot)
                 now = time.monotonic()
-                if now - last_auto_attack >= 0.75:
+                if bot.player.food <= 10 and now - last_food_attempt >= 3.0:
+                    last_food_attempt = now
+                    await eat_food_if_needed(bot)
+                if bot.version.protocol >= 776 and now - last_auto_attack >= 0.75:
                     threats = []
                     for entity in bot.entities.values():
                         mob_name = entity_identifier(bot, entity).rsplit(":", 1)[-1]
@@ -747,12 +751,12 @@ async def main_async():
                     if threats:
                         threats.sort(key=lambda item: item[0])
                         distance, target, mob_name = threats[0]
-                        if mob_name == "creeper" and distance < 3.0:
+                        if (mob_name == "creeper" and distance < 3.0) or bot.player.health <= 7.0:
                             dx, dz = bot.player.x-target.x, bot.player.z-target.z
                             length = max(math.hypot(dx, dz), 0.001)
                             retreat_x = bot.player.x + (dx/length)*5.0
                             retreat_z = bot.player.z + (dz/length)*5.0
-                            log("[DEFESA] Creeper muito próximo; tentando recuar.")
+                            log("[DEFESA] Ameaça próxima ou vida baixa; tentando recuar.")
                             try:
                                 await bot.navigate_to(retreat_x, retreat_z, y=None, timeout=3, max_nodes=2048, max_drop=3.0, replans=2)
                             except Exception:
