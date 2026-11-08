@@ -13,6 +13,12 @@ from PySide6.QtWebView import QWebView, QtWebView
 from interface_bundle import install_interface_files
 
 FROZEN = getattr(sys, "frozen", False)
+IS_ANDROID = (
+    IS_ANDROID
+    or hasattr(sys, "getandroidapilevel")
+    or "ANDROID_ARGUMENT" in os.environ
+    or "ANDROID_PRIVATE" in os.environ
+)
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) if FROZEN else Path(__file__).resolve().parent
 
 
@@ -20,6 +26,23 @@ def prepare_user_data_dir():
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
         candidates = [base / "MinecraftAIBot", Path.home() / "MinecraftAIBot"]
+    elif IS_ANDROID:
+        candidates = []
+        for env_name in ("ANDROID_PRIVATE", "ANDROID_APP_PATH"):
+            value = os.environ.get(env_name)
+            if value:
+                candidates.append(Path(value) / "MinecraftAIBot")
+        try:
+            for location in (
+                QStandardPaths.StandardLocation.AppDataLocation,
+                QStandardPaths.StandardLocation.AppConfigLocation,
+            ):
+                qt_path = QStandardPaths.writableLocation(location)
+                if qt_path:
+                    candidates.append(Path(qt_path) / "MinecraftAIBot")
+        except Exception:
+            pass
+        candidates.append(Path.home() / "MinecraftAIBot")
     else:
         xdg = os.environ.get("XDG_CONFIG_HOME")
         preferred = Path(xdg) / "MinecraftAIBot" if xdg and Path(xdg).is_absolute() else Path.home() / ".config" / "MinecraftAIBot"
@@ -242,7 +265,7 @@ class MainWindow(QMainWindow):
             self.send_ui_event({"type":"log","text":"AVISO: este ambiente não disponibilizou uma bandeja do sistema."})
 
     def is_bot_running(self):
-        if sys.platform == "android":
+        if IS_ANDROID:
             return self.bot_thread is not None and self.bot_thread.isRunning()
         return self.process.state() != QProcess.ProcessState.NotRunning
 
@@ -347,7 +370,7 @@ class MainWindow(QMainWindow):
             "PYTHONIOENCODING": "utf-8",
             "MINEBOT_MODEL_DIR": str(USER_DATA_DIR / "models")
         }
-        if sys.platform == "android":
+        if IS_ANDROID:
             self.bot_thread = BotWorkerThread(environment, self)
             self.bot_thread.finished.connect(self.android_worker_finished)
             self.bot_thread.start()
@@ -384,7 +407,7 @@ class MainWindow(QMainWindow):
         self.refresh_state(force=True)
 
     def stop_bot(self):
-        if sys.platform == "android":
+        if IS_ANDROID:
             if self.is_bot_running():
                 self.save_control(False, stop=True)
                 if not self.bot_thread.wait(8000):
@@ -458,7 +481,7 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def force_quit_app(self):
-        if sys.platform == "android":
+        if IS_ANDROID:
             if self.is_bot_running():
                 self.save_control(False, stop=True)
                 if not self.bot_thread.wait(15000):
@@ -472,7 +495,7 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def closeEvent(self, event):
-        if sys.platform == "android":
+        if IS_ANDROID:
             # Android has no desktop tray. Closing the control window hides the
             # activity window but deliberately leaves the bot worker connected.
             # The user can return through Android's recent-apps screen.
