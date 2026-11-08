@@ -195,7 +195,9 @@ def world_state(bot, recent_events=None):
         "on_ground": p.on_ground, "health": p.health, "food": p.food,
         "saturation": round(p.saturation, 1), "players": players,
         "nearby_entities": nearby_entities[:25], "nearby_blocks": blocks[:45],
-        "inventory": inventory[:45], "recent_events": list(recent_events or [])[-30:]
+        "inventory": inventory[:45],
+        "equipment": {str(slot.name): stack.identifier for slot, stack in p.equipment.items() if stack.count},
+        "recent_events": list(recent_events or [])[-30:]
     }
 
 def encode_varint(value):
@@ -400,6 +402,14 @@ async def main_async():
             block = bot.world.block_states.get(state_id).name
             record_event("block_update", f"{block} em {x},{y},{z}")
 
+    @bot.on("section_blocks_update")
+    async def on_section_blocks_update(updates):
+        nearby = []
+        for x, y, z, state_id in updates:
+            if math.dist((x, y, z), (bot.player.x, bot.player.y, bot.player.z)) <= 12:
+                nearby.append(f"{bot.world.block_states.get(state_id).name}@{x},{y},{z}")
+        if nearby:
+            record_event("multi_block_update", "; ".join(nearby[:12]))
     @bot.on("entity_add")
     async def on_entity_add(entity):
         if math.dist((entity.x, entity.y, entity.z), (bot.player.x, bot.player.y, bot.player.z)) <= 20:
