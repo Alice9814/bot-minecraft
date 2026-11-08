@@ -45,14 +45,16 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json;." --add-data "interface;interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name ProtoBot --add-data "config.json;." --add-data "interface;interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
       - name: Build Linux application
         if: runner.os == 'Linux'
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json:." --add-data "interface:interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name ProtoBot --add-data "config.json:." --add-data "interface:interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/ProtoBot/
+          path: |
+            dist/ProtoBot.exe
+            dist/ProtoBot
           if-no-files-found: error
