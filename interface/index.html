@@ -6,7 +6,6 @@
   <meta name="color-scheme" content="dark">
   <title>ProtoBot</title>
   <link rel="stylesheet" href="style.css">
-  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -115,12 +114,20 @@
     </main>
   </div>
   <script>
-    if (typeof qt !== "undefined" && typeof QWebChannel !== "undefined") {
-      new QWebChannel(qt.webChannelTransport, function(channel) {
-        window.protoBridge = channel.objects.bridge;
-        document.dispatchEvent(new Event("proto-bridge-ready"));
-      });
-    }
+    (function () {
+      const queue = [];
+      window.protoNative = {
+        invoke: function (method, args) {
+          queue.push({method: method, args: Array.isArray(args) ? args : []});
+        }
+      };
+      window.__protoDrainCommands = function () {
+        return queue.splice(0, queue.length);
+      };
+      window.__protoReceive = function (event) {
+        document.dispatchEvent(new CustomEvent("proto-event", {detail: event}));
+      };
+    })();
   </script>
 </body>
 </html>
