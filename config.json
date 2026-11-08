@@ -7,8 +7,8 @@
     "version": "26.2"
   },
   "ai": {
-    "model": "gemma-3-270m-it-Q4_K_M.gguf",
-    "temperature": 0.3
+    "model": "gemma-3-1b-it-Q4_K_M.gguf",
+    "temperature": 0.7
   },
   "behavior": {
     "respond_only_when_mentioned": false,
