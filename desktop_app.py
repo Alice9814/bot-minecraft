@@ -385,7 +385,9 @@ class MainWindow(QMainWindow):
         if sys.platform == "android":
             if self.is_bot_running():
                 self.save_control(False, stop=True)
-                self.bot_thread.wait(5000)
+                if not self.bot_thread.wait(15000):
+                    self.send_ui_event({"type":"log","text":"O bot ainda está encerrando. Aguarde antes de fechar o aplicativo."})
+                    return
         elif self.is_bot_running():
             self.process.kill()
             self.process.waitForFinished(2000)
@@ -393,6 +395,15 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def closeEvent(self, event):
+        if sys.platform == "android":
+            if self.is_bot_running():
+                self.save_control(False, stop=True)
+                if not self.bot_thread.wait(15000):
+                    event.ignore()
+                    self.send_ui_event({"type":"log","text":"O bot ainda está encerrando. Aguarde e tente voltar."})
+                    return
+            event.accept()
+            return
         if self.tray.isVisible():
             event.ignore()
             self.hide()
