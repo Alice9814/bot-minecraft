@@ -166,6 +166,62 @@ async def main_async():
         log("[MINECRAFT] Conexão encerrada:", reason or bot.disconnect_reason or "sem motivo informado")
         stopped.set()
 
+    # Automatic respawn: ProtoBot emits "death" for this bot only.
+    # The "respawn" event confirms that the server accepted the request.
+    respawn_confirmed = asyncio.Event()
+    respawn_lock = asyncio.Lock()
+    respawn_tasks = set()
+
+    @bot.on("respawn")
+    async def on_respawn(session):
+        respawn_confirmed.set()
+        log("[MINECRAFT] Respawn confirmado no mundo:", session.dimension_name)
+
+    async def auto_respawn(death_message):
+        async with respawn_lock:
+            if death_message:
+                try:
+                    log("[MINECRAFT] O bot morreu:", plain_text(death_message))
+                except Exception:
+                    log("[MINECRAFT] O bot morreu.")
+            else:
+                log("[MINECRAFT] O bot morreu (vida chegou a zero).")
+
+            # Initial delay gives the server time to finish opening the death screen.
+            for attempt in range(1, 4):
+                if bot.closed.is_set() or stopped.is_set():
+                    return
+
+                delay = 1.0 if attempt == 1 else 2.0
+                if attempt > 1:
+                    log(f"[MINECRAFT] Tentativa de respawn {attempt}/3 em {delay:.0f}s.")
+                await asyncio.sleep(delay)
+
+                if bot.closed.is_set() or stopped.is_set():
+                    return
+
+                respawn_confirmed.clear()
+                try:
+                    await bot.respawn()
+                    await asyncio.wait_for(respawn_confirmed.wait(), timeout=8.0)
+                    log("[MINECRAFT] O bot voltou à vida automaticamente.")
+                    return
+                except asyncio.TimeoutError:
+                    log(f"[MINECRAFT] O servidor ainda não confirmou o respawn ({attempt}/3).")
+                except Exception as exc:
+                    log("[MINECRAFT] Não foi possível solicitar respawn:", exc)
+                    # Unsupported protocol versions cannot be fixed by retrying.
+                    if type(exc).__name__ in ("UnsupportedVersion", "NotImplementedError"):
+                        return
+
+            log("[MINECRAFT] Respawn automático esgotou as tentativas.")
+
+    @bot.on("death")
+    async def on_death(message):
+        task = asyncio.create_task(auto_respawn(message))
+        respawn_tasks.add(task)
+        task.add_done_callback(respawn_tasks.discard)
+
     async def process_player_message(name, text_message):
         nonlocal history
         if paused or busy.locked():
@@ -230,6 +286,10 @@ async def main_async():
         await stopped.wait()
     finally:
         control_task.cancel()
+        for task in list(respawn_tasks):
+            task.cancel()
+        if respawn_tasks:
+            await asyncio.gather(*respawn_tasks, return_exceptions=True)
         await bot.close()
 
 def main():
