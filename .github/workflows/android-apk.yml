@@ -116,29 +116,49 @@ jobs:
           test -n "$PYSIDE_WHEEL"
           test -n "$SHIBOKEN_WHEEL"
 
-          # Patch PySide6's Buildozer configuration generator so the
-          # cleartext exception is included in the generated Android manifest.
+          # Patch the installed PySide6 Android manifest generator.
+          # Search site-packages recursively because its package directory
+          # differs between PySide6 releases.
           python - <<'PY'
           from pathlib import Path
-          import PySide6
+          import re
+          import site
 
-          package_root = Path(PySide6.__file__).resolve().parent
-          candidates = list(package_root.parent.glob("pyside_tools/deploy_lib/android/buildozer.py"))
+          candidates = []
+          for base in site.getsitepackages():
+              root = Path(base)
+              if root.exists():
+                  candidates.extend(root.rglob("buildozer.py"))
+
+          candidates = [
+              path for path in candidates
+              if "deploy_lib" in path.parts and "android" in path.parts
+          ]
           if not candidates:
-              candidates = list(package_root.parent.glob("*/deploy_lib/android/buildozer.py"))
-          if not candidates:
-              raise SystemExit("Could not locate PySide6 Android Buildozer generator")
+              raise SystemExit(
+                  "Could not locate buildozer.py under site-packages. "
+                  "Searched: " + ", ".join(site.getsitepackages())
+              )
 
           source_path = candidates[0]
           source = source_path.read_text(encoding="utf-8")
-          target = "        self.update_config()"
-          injection = """        self.set_value("app", "android.extra_manifest_application_arguments", 'android:usesCleartextTraffic="true"', raise_warning=False)
-          self.update_config()"""
           if "android:usesCleartextTraffic" not in source:
-              if target not in source:
-                  raise SystemExit("Could not find BuildozerConfig update point")
-              source = source.replace(target, injection, 1)
+              pattern = re.compile(r"(?m)^(\\s*)self\\.update_config\\(\\)\\s*$")
+              match = pattern.search(source)
+              if not match:
+                  raise SystemExit(
+                      f"Found {source_path}, but could not find self.update_config()"
+                  )
+
+              indent = match.group(1)
+              setting = (
+                  indent
+                  + 'self.set_value("app", "android.extra_manifest_application_arguments", '
+                  + '\'android:usesCleartextTraffic="true"\', raise_warning=False)\\n'
+              )
+              source = source[:match.start()] + setting + source[match.start():]
               source_path.write_text(source, encoding="utf-8")
+
           print(f"Patched Android manifest generator: {source_path}")
           PY
 
