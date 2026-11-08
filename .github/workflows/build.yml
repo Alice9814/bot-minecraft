@@ -50,7 +50,7 @@ jobs:
       - name: Build Linux application
         if: runner.os == 'Linux'
         run: |
-          pyinstaller --noconfirm --clean --onedir --name MinecraftAIBot --add-data "config.json:." --collect-all javascript --collect-all PySide6 desktop_app.py
+          pyinstaller --noconfirm --clean --onedir --windowed --name MinecraftAIBot --add-data "config.json:." --collect-all javascript --collect-all PySide6 desktop_app.py
       - name: Bundle Node.js and Mineflayer packages (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
