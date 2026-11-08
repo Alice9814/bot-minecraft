@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
     def load_config(self):
         defaults = {
             "minecraft": {"host": "127.0.0.1", "port": 25565, "username": "OllamaBot", "auth": "offline", "version": False},
-            "ollama": {"url": "http://127.0.0.1:11434/api/chat", "model": "gemma3:270m", "timeout_seconds": 90, "temperature": 0.3},
+            "ai": {"model": "gemma-3-270m-it-Q4_K_M.gguf", "temperature": 0.3},
             "behavior": {"respond_only_when_mentioned": False, "mention_name": "OllamaBot", "max_chat_length": 180}
         }
         try:
@@ -127,6 +127,9 @@ class MainWindow(QMainWindow):
                 loaded = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
                 for section in defaults:
                     defaults[section].update(loaded.get(section, {}))
+                # Migrate settings from older Ollama-based releases.
+                if "ai" not in loaded and "ollama" in loaded:
+                    defaults["ai"]["temperature"] = loaded["ollama"].get("temperature", 0.3)
         except Exception as exc:
             QMessageBox.warning(self, "Configuração", f"Não foi possível ler config.json:\n{exc}")
         return defaults
@@ -152,13 +155,15 @@ class MainWindow(QMainWindow):
         mc.addRow("Nome do bot:", self.username); mc.addRow("Autenticação:", self.auth)
         layout.addWidget(mc_box)
 
-        ai_box = QGroupBox("Inteligência artificial — Ollama")
+        ai_box = QGroupBox("Inteligência artificial — Gemma 3 270M (local)")
         ai = QFormLayout(ai_box)
-        self.model = QLineEdit(str(self.config["ollama"].get("model", "gemma3:270m")))
-        self.ollama_url = QLineEdit(str(self.config["ollama"].get("url", "http://127.0.0.1:11434/api/chat")))
+        self.model = QLineEdit("Gemma 3 270M Instruct — GGUF Q4_K_M")
+        self.model.setReadOnly(True)
         self.temperature = QDoubleSpinBox(); self.temperature.setRange(0, 2); self.temperature.setSingleStep(0.1)
-        self.temperature.setValue(float(self.config["ollama"].get("temperature", 0.3)))
-        ai.addRow("Modelo:", self.model); ai.addRow("API:", self.ollama_url); ai.addRow("Temperatura:", self.temperature)
+        self.temperature.setValue(float(self.config["ai"].get("temperature", 0.3)))
+        ai.addRow("Modelo:", self.model)
+        ai.addRow("Temperatura:", self.temperature)
+        ai.addRow(QLabel("O modelo (~253 MB) é baixado automaticamente na primeira execução e depois funciona offline."))
         layout.addWidget(ai_box)
 
         self.mention = QCheckBox("Responder somente quando mencionarem o nome do bot")
@@ -206,7 +211,7 @@ class MainWindow(QMainWindow):
     def save_config(self):
         self.config["minecraft"].update({"host": self.host.text().strip(), "port": self.port.value(),
             "username": self.username.text().strip(), "auth": self.auth.currentText()})
-        self.config["ollama"].update({"model": self.model.text().strip(), "url": self.ollama_url.text().strip(),
+        self.config["ai"].update({"model": "gemma-3-270m-it-Q4_K_M.gguf",
             "temperature": self.temperature.value()})
         self.config["behavior"]["respond_only_when_mentioned"] = self.mention.isChecked()
         try:
@@ -227,8 +232,7 @@ class MainWindow(QMainWindow):
         env.insert("MINEBOT_CONTROL", str(CONTROL_PATH))
         env.insert("MINEBOT_LOG", str(LOG_PATH))
         env.insert("PYTHONUNBUFFERED", "1")
-        env.insert("NODE_PATH", str(APP_DIR / "node_modules"))
-        env.insert("PATH", str(APP_DIR) + os.pathsep + env.value("PATH"))
+        env.insert("MINEBOT_MODEL_DIR", str(USER_DATA_DIR / "models"))
         self.process.setProcessEnvironment(env)
         if FROZEN:
             self.process.start(sys.executable, ["--worker"])
