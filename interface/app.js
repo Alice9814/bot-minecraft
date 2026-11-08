@@ -86,6 +86,7 @@
   function receiveEvent(event) {
     if (!event || typeof event !== "object") return;
     if (event.type === "log") appendLog(event.text);
+    else if (event.type === "clearLogs") { logs = []; appendLog("Logs limpos."); }
     else if (event.type === "state") setState(event.running,event.paused);
     else if (event.type === "config") {
       try { fillConfig(typeof event.value === "string" ? JSON.parse(event.value) : event.value); }
