@@ -149,16 +149,8 @@ async def main_async():
         log("[MINECRAFT] Conexão encerrada:", reason or bot.disconnect_reason or "sem motivo informado")
         stopped.set()
 
-    @bot.on("player_chat")
-    async def on_player_chat(sender_uuid, name, message, chat_type_id, target_name):
+    async def process_player_message(name, text_message):
         nonlocal history
-        text_message = plain_text(message).strip()
-        if not name or name == bot.username or not text_message:
-            return
-        log("[CHAT]", name, ":", text_message)
-        mention = str(BEHAVIOR.get("mention_name", username))
-        if BEHAVIOR.get("respond_only_when_mentioned", False) and mention.casefold() not in text_message.casefold():
-            return
         if paused or busy.locked():
             return
         async with busy:
@@ -174,6 +166,19 @@ async def main_async():
                 del history[1:-8]
             except Exception as exc:
                 log("[IA] Erro ao processar mensagem:", exc)
+
+    @bot.on("player_chat")
+    async def on_player_chat(sender_uuid, name, message, chat_type_id, target_name):
+        text_message = plain_text(message).strip()
+        if not name or name == bot.username or not text_message:
+            return
+        log("[CHAT]", name, ":", text_message)
+        mention = str(BEHAVIOR.get("mention_name", username))
+        if BEHAVIOR.get("respond_only_when_mentioned", False) and mention.casefold() not in text_message.casefold():
+            return
+        # Never hold ProtoBot's packet-reader task while the model thinks or
+        # while navigation is running. The handler returns immediately.
+        asyncio.create_task(process_player_message(name, text_message))
 
     async def control_loop():
         nonlocal paused
