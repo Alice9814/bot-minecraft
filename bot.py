@@ -145,17 +145,17 @@ async def main_async():
     auth = await authenticate()
     username = auth.get("username", MC.get("username", "OllamaBot"))
     version = MC.get("version") or "26.2"
-    log("[IA] Preparando Gemma 3 270M local. Na primeira execução o modelo será baixado.")
+    log("[IA] Preparando Gemma 3 1B Instruct local. Na primeira execução o modelo (~806 MB) será baixado.")
     model = LocalGemma(Path(os.environ.get("MINEBOT_MODEL_DIR", str(CONFIG_PATH.parent / "models"))),
                        float(AI.get("temperature", 0.3)))
     await asyncio.to_thread(model.load)
-    log("[IA] Gemma 3 270M carregado localmente; Ollama não é necessário.")
+    log("[IA] Gemma 3 1B carregado localmente; Ollama não é necessário.")
     bot = await connect(MC.get("host", "127.0.0.1"), port=int(MC.get("port", 25565)),
                         username=username, version=version,
                         access_token=auth.get("access_token"), profile_uuid=auth.get("profile_uuid"))
     log("Minecraft conectado:", bot.username, "versão", bot.version.name,
         "em", tuple(round(v, 1) for v in bot.player.position))
-    await bot.send_message("Olá! Estou online com ProtoBot e IA local Gemma 3 270M.")
+    await bot.send_message("Olá! Estou online com ProtoBot e IA local Gemma 3 1B.")
     history = [{"role": "system", "content": PROMPT}]
     busy = asyncio.Lock()
     paused = bool(read_control().get("paused", False))
