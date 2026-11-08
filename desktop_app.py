@@ -13,11 +13,58 @@ from PySide6.QtWidgets import (
 
 FROZEN = getattr(sys, "frozen", False)
 APP_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
-USER_DATA_DIR = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation))
-USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-CONFIG_PATH = USER_DATA_DIR / "config.json"
-CONTROL_PATH = USER_DATA_DIR / "bot-control.json"
-LOG_PATH = USER_DATA_DIR / "bot.log"
+
+
+def prepare_user_data_dir():
+    # QStandardPaths precisa ser consultado depois de criar QApplication.
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+        candidates = [base / "MinecraftAIBot", Path.home() / "MinecraftAIBot"]
+    else:
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        if xdg and Path(xdg).is_absolute():
+            preferred = Path(xdg) / "MinecraftAIBot"
+        else:
+            preferred = Path.home() / ".config" / "MinecraftAIBot"
+        candidates = [preferred, Path.home() / ".local" / "share" / "MinecraftAIBot"]
+        try:
+            qt_path = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppConfigLocation
+            )
+            if qt_path:
+                candidates.insert(0, Path(qt_path))
+        except Exception:
+            pass
+
+    last_error = None
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write-test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return candidate
+        except (OSError, PermissionError) as exc:
+            last_error = exc
+
+    # Último recurso: diretório temporário específico do usuário, nunca a raiz.
+    import tempfile
+    suffix = str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", "user")
+    fallback = Path(tempfile.gettempdir()) / f"MinecraftAIBot-{suffix}"
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+    except OSError as exc:
+        raise RuntimeError(
+            f"Não foi possível criar uma pasta gravável para as configurações. "
+            f"Último erro: {last_error or exc}"
+        ) from exc
+
+
+USER_DATA_DIR = None
+CONFIG_PATH = None
+CONTROL_PATH = None
+LOG_PATH = None
 
 
 def make_icon(color="#7cdb8a"):
@@ -40,6 +87,11 @@ def make_icon(color="#7cdb8a"):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        global USER_DATA_DIR, CONFIG_PATH, CONTROL_PATH, LOG_PATH
+        USER_DATA_DIR = prepare_user_data_dir()
+        CONFIG_PATH = USER_DATA_DIR / "config.json"
+        CONTROL_PATH = USER_DATA_DIR / "bot-control.json"
+        LOG_PATH = USER_DATA_DIR / "bot.log"
         self.setWindowTitle("Minecraft AI Bot")
         self.setWindowIcon(make_icon())
         self.resize(680, 650)
@@ -266,6 +318,7 @@ if __name__ == "__main__":
         run_worker()
     else:
         app = QApplication(sys.argv)
+        app.setOrganizationName("MinecraftAIBot")
         app.setApplicationName("MinecraftAIBot")
         app.setQuitOnLastWindowClosed(False)
         window = MainWindow()
