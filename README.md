@@ -42,16 +42,16 @@ O aplicativo usa PySide6 6.11+, Qt WebView e Qt Widgets. Não é necessário ins
 
 ## Gerar os aplicativos desktop
 
-O workflow `.github/workflows/build.yml` compila pastas executáveis para Windows e Linux. Ele inclui os arquivos HTML e o runtime do ProtoBot/llama.cpp. Os pesos do modelo são baixados na primeira execução para manter o artefato menor.
+O workflow `.github/workflows/build.yml` compila executáveis únicos para Windows e Linux usando PyInstaller em modo `onefile`. As dependências Python, Qt, ProtoBot, llama.cpp e os arquivos da interface são incorporados ao executável. Na inicialização, o PyInstaller extrai os componentes em uma pasta temporária; não é necessário distribuir `_internal` nem a pasta `interface` ao lado do executável. Os pesos do modelo permanecem na pasta de dados do usuário e são baixados na primeira execução.
 
 Windows:
 ```powershell
-pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json;." --add-data "interface;interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
+pyinstaller --noconfirm --clean --onefile --windowed --name ProtoBot --add-data "interface;interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
 ```
 
 Linux:
 ```bash
-pyinstaller --noconfirm --clean --onedir --windowed --name ProtoBot --add-data "config.json:." --add-data "interface:interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
+pyinstaller --noconfirm --clean --onefile --windowed --name ProtoBot --add-data "interface:interface" --collect-all protobot --collect-all llama_cpp --collect-all cryptography --collect-all PySide6 desktop_app.py
 ```
 
 ## Android
