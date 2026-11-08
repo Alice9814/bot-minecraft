@@ -69,5 +69,6 @@ class LocalGemma:
             messages=messages,
             temperature=self.temperature,
             max_tokens=180,
+            response_format={"type": "json_object"},
         )
         return result["choices"][0]["message"]["content"] or ""
