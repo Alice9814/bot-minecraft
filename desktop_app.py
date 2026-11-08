@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QSystemTra
 from PySide6.QtWebView import QWebView, QtWebView
 
 FROZEN = getattr(sys, "frozen", False)
-APP_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
+APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) if FROZEN else Path(__file__).resolve().parent
 
 
 def prepare_user_data_dir():
