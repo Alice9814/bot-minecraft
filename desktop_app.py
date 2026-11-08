@@ -172,12 +172,15 @@ class MainWindow(QMainWindow):
         self.pause_button = QPushButton("Pausar")
         self.stop_button = QPushButton("Encerrar")
         self.save_button = QPushButton("Salvar configurações")
+        self.force_quit_button = QPushButton("Forçar fechar aplicativo")
+        self.force_quit_button.setToolTip("Encerra o bot e fecha o aplicativo sem depender da bandeja do sistema.")
         self.pause_button.setEnabled(False); self.stop_button.setEnabled(False)
         self.start_button.clicked.connect(self.start_bot)
         self.pause_button.clicked.connect(self.toggle_pause)
         self.stop_button.clicked.connect(self.stop_bot)
         self.save_button.clicked.connect(self.save_config)
-        for button in (self.start_button, self.pause_button, self.stop_button, self.save_button):
+        self.force_quit_button.clicked.connect(self.force_quit_app)
+        for button in (self.start_button, self.pause_button, self.stop_button, self.save_button, self.force_quit_button):
             buttons.addWidget(button)
         layout.addLayout(buttons)
 
@@ -307,6 +310,15 @@ class MainWindow(QMainWindow):
 
     def quit_app(self):
         self.stop_bot()
+        self.tray.hide()
+        QApplication.quit()
+
+    def force_quit_app(self):
+        """Fecha o aplicativo mesmo quando a bandeja do sistema está com problemas."""
+        self.console.append("Forçando o encerramento do aplicativo...")
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            self.process.kill()
+            self.process.waitForFinished(2000)
         self.tray.hide()
         QApplication.quit()
 
