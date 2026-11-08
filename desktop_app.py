@@ -186,7 +186,14 @@ class MainWindow(QMainWindow):
 
         self.status = QLabel("Status: parado")
         layout.addWidget(self.status)
-        layout.addWidget(QLabel("Console"))
+        console_header = QHBoxLayout()
+        console_header.addWidget(QLabel("Console"))
+        console_header.addStretch(1)
+        self.clear_logs_button = QPushButton("Limpar logs")
+        self.clear_logs_button.setToolTip("Limpa os registros exibidos e o arquivo de log atual.")
+        self.clear_logs_button.clicked.connect(self.clear_logs)
+        console_header.addWidget(self.clear_logs_button)
+        layout.addLayout(console_header)
         self.console = QTextEdit(); self.console.setReadOnly(True)
         layout.addWidget(self.console, 1)
         self.setCentralWidget(root)
@@ -232,6 +239,7 @@ class MainWindow(QMainWindow):
         env.insert("MINEBOT_CONTROL", str(CONTROL_PATH))
         env.insert("MINEBOT_LOG", str(LOG_PATH))
         env.insert("PYTHONUNBUFFERED", "1")
+        env.insert("PYTHONIOENCODING", "utf-8")
         env.insert("MINEBOT_MODEL_DIR", str(USER_DATA_DIR / "models"))
         self.process.setProcessEnvironment(env)
         if FROZEN:
@@ -265,10 +273,27 @@ class MainWindow(QMainWindow):
                 self.process.kill()
             self.console.append("Bot encerrado.")
 
+    def clear_logs(self):
+        """Limpa a tela e o arquivo de log sem parar o bot."""
+        self.console.clear()
+        try:
+            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LOG_PATH.write_text("", encoding="utf-8")
+            self.log_offset = 0
+            # Descarta qualquer saída antiga ainda armazenada pelo QProcess.
+            self.process.readAllStandardOutput()
+        except OSError as exc:
+            QMessageBox.warning(self, "Limpar logs", f"Não foi possível limpar o arquivo de log:\n{exc}")
+
     def read_output(self):
-        data = bytes(self.process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        if data:
-            self.console.append(data.rstrip())
+        data = bytes(self.process.readAllStandardOutput())
+        # No executável empacotado, a fonte oficial é bot.log (UTF-8).
+        # O worker também escreve no stdout; mostrar ambos duplicaria cada linha.
+        if FROZEN:
+            return
+        text = data.decode("utf-8", errors="replace")
+        if text:
+            self.console.append(text.rstrip())
 
     def read_log_file(self):
         if not FROZEN or not LOG_PATH.exists():
