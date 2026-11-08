@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QStandardP
 from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor, QFont
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QSystemTrayIcon, QMenu, QWidget
 from PySide6.QtWebView import QWebView, QtWebView
+from interface_bundle import install_interface_files
 
 FROZEN = getattr(sys, "frozen", False)
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) if FROZEN else Path(__file__).resolve().parent
@@ -130,13 +131,20 @@ class MainWindow(QMainWindow):
         self.web_server = None
         self.web_server_thread = None
         self._control_page_loaded = False
+        bundled_interface = APP_DIR / "interface"
+        if bundled_interface.is_dir() and (bundled_interface / "index.html").is_file():
+            self.interface_dir = bundled_interface
+        else:
+            # Android deploys Python modules but may omit loose HTML assets.
+            # The same resources are embedded in interface_bundle.py.
+            self.interface_dir = install_interface_files(USER_DATA_DIR / "app_assets")
 
         self.web_view = QWebView()
         container = QWidget.createWindowContainer(self.web_view, self)
         container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCentralWidget(container)
 
-        index_file = APP_DIR / "interface" / "index.html"
+        index_file = self.interface_dir / "index.html"
         if not index_file.is_file():
             QMessageBox.critical(self, "Interface não encontrada", f"Não encontrei o arquivo HTML:\n{index_file}")
         else:
@@ -155,8 +163,7 @@ class MainWindow(QMainWindow):
 
     def start_interface_server(self):
         """Serve HTML/CSS/JS on loopback, avoiding file:// access restrictions."""
-        interface_dir = APP_DIR / "interface"
-        handler = partial(QuietStaticHandler, directory=str(interface_dir))
+        handler = partial(QuietStaticHandler, directory=str(self.interface_dir))
         self.web_server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.web_server.daemon_threads = True
         self.web_server_thread = threading.Thread(
@@ -453,13 +460,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if sys.platform == "android":
-            if self.is_bot_running():
-                self.save_control(False, stop=True)
-                if not self.bot_thread.wait(15000):
-                    event.ignore()
-                    self.send_ui_event({"type":"log","text":"O bot ainda está encerrando. Aguarde e tente voltar."})
-                    return
-            event.accept()
+            # Android has no desktop tray. Closing the control window hides the
+            # activity window but deliberately leaves the bot worker connected.
+            # The user can return through Android's recent-apps screen.
+            event.ignore()
+            self.unload_control_page()
+            self.hide()
             return
         if self.tray.isVisible():
             event.ignore()
