@@ -43,17 +43,31 @@ def read_control():
         return {"paused": False}
 
 def parse_action(answer):
-    answer = str(answer).strip()
+    answer = str(answer or "").strip()
+    max_length = int(BEHAVIOR.get("max_chat_length", 180))
+
+    # Gemma 270M sometimes answers naturally instead of following the JSON
+    # instruction. Treat ordinary text as a chat reply rather than failing.
+    if answer.startswith("```"):
+        answer = re.sub(r"^\`\`\`(?:json)?\s*|\s*\`\`\`$", "", answer, flags=re.IGNORECASE).strip()
+
     start, end = answer.find("{"), answer.rfind("}")
     if start < 0 or end <= start:
-        raise ValueError("A IA não retornou uma ação JSON válida.")
-    obj = json.loads(answer[start:end + 1])
+        message = re.sub(r"\s+", " ", answer).strip().strip('"')
+        return {"type": "chat", "text": message[:max_length]} if message else {"type": "none"}
+
+    try:
+        obj = json.loads(answer[start:end + 1])
+    except (json.JSONDecodeError, TypeError):
+        message = re.sub(r"\s+", " ", answer).strip()
+        return {"type": "chat", "text": message[:max_length]} if message else {"type": "none"}
+
     if not isinstance(obj, dict):
         return {"type": "none"}
     kind = obj.get("type")
     if kind == "chat":
         message = str(obj.get("text", "")).replace("\n", " ").strip()
-        return {"type": "chat", "text": message[:int(BEHAVIOR.get("max_chat_length", 180))]} if message else {"type": "none"}
+        return {"type": "chat", "text": message[:max_length]} if message else {"type": "none"}
     if kind in ("move_to", "look"):
         keys = ("x", "y", "z") if kind == "move_to" else ("yaw", "pitch")
         try:
