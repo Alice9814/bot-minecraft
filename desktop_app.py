@@ -1,6 +1,9 @@
 import json
 import os
 import sys
+import threading
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer, QStandardPaths, QUrl, QThread
@@ -96,6 +99,12 @@ class BotWorkerThread(QThread):
                 pass
 
 
+class QuietStaticHandler(SimpleHTTPRequestHandler):
+    """Serve the bundled interface without writing routine requests to stderr."""
+    def log_message(self, format, *args):
+        pass
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -118,6 +127,8 @@ class MainWindow(QMainWindow):
         self._polling_js = False
         self._last_state = None
         self.config = self.load_config()
+        self.web_server = None
+        self.web_server_thread = None
 
         self.web_view = QWebView()
         container = QWidget.createWindowContainer(self.web_view, self)
@@ -125,10 +136,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
 
         index_file = APP_DIR / "interface" / "index.html"
-        if not index_file.exists():
-            QMessageBox.critical(self, "Interface não encontrada", f"Não encontrei os arquivos HTML:\n{index_file}")
+        if not index_file.is_file():
+            QMessageBox.critical(self, "Interface não encontrada", f"Não encontrei o arquivo HTML:\n{index_file}")
         else:
-            self.web_view.setUrl(QUrl.fromLocalFile(str(index_file.resolve())))
+            try:
+                self.start_interface_server()
+                self.web_view.setUrl(QUrl(self.interface_url))
+            except OSError as exc:
+                QMessageBox.critical(self, "Erro ao iniciar interface", f"Não foi possível iniciar o servidor local da interface:\n{exc}")
 
         self.setup_tray()
         self.timer = QTimer(self)
@@ -136,6 +151,31 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.refresh_state)
         self.timer.timeout.connect(self.poll_ui_commands)
         self.timer.start(150)
+
+    def start_interface_server(self):
+        """Serve HTML/CSS/JS on loopback, avoiding file:// access restrictions."""
+        interface_dir = APP_DIR / "interface"
+        handler = partial(QuietStaticHandler, directory=str(interface_dir))
+        self.web_server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.web_server.daemon_threads = True
+        self.web_server_thread = threading.Thread(
+            target=self.web_server.serve_forever,
+            name="ProtoBotInterfaceServer",
+            daemon=True,
+        )
+        self.web_server_thread.start()
+        host, port = self.web_server.server_address
+        self.interface_url = f"http://{host}:{port}/index.html"
+
+    def stop_interface_server(self):
+        server = self.web_server
+        self.web_server = None
+        if server is not None:
+            try:
+                server.shutdown()
+                server.server_close()
+            except OSError:
+                pass
 
     def load_config(self):
         config = default_config()
@@ -378,6 +418,7 @@ class MainWindow(QMainWindow):
 
     def quit_app(self):
         self.stop_bot()
+        self.stop_interface_server()
         self.tray.hide()
         QApplication.quit()
 
@@ -391,6 +432,7 @@ class MainWindow(QMainWindow):
         elif self.is_bot_running():
             self.process.kill()
             self.process.waitForFinished(2000)
+        self.stop_interface_server()
         self.tray.hide()
         QApplication.quit()
 
@@ -434,6 +476,7 @@ def run_gui():
     app.setApplicationName("ProtoBot")
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
+    app.aboutToQuit.connect(window.stop_interface_server)
     window.show()
     sys.exit(app.exec())
 
