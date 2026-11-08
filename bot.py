@@ -115,7 +115,36 @@ def normalize_text(value):
     return re.sub(r"\\s+", " ", value).strip().casefold()
 
 
-def world_state(bot):
+HOSTILE_MOBS = {
+    "zombie", "husk", "drowned", "skeleton", "stray", "bogged",
+    "wither_skeleton", "creeper", "spider", "cave_spider", "slime",
+    "magma_cube", "witch", "pillager", "vindicator", "evoker", "vex",
+    "ravager", "guardian", "elder_guardian", "phantom", "blaze", "ghast",
+    "hoglin", "zoglin", "piglin_brute", "warden", "breeze", "silverfish",
+    "endermite", "shulker"
+}
+FOOD_ITEMS = {
+    "apple", "golden_apple", "enchanted_golden_apple", "bread", "baked_potato",
+    "carrot", "golden_carrot", "potato", "beetroot", "beetroot_soup",
+    "mushroom_stew", "rabbit_stew", "suspicious_stew", "cooked_beef",
+    "cooked_porkchop", "cooked_chicken", "cooked_mutton", "cooked_rabbit",
+    "cooked_cod", "cooked_salmon", "beef", "porkchop", "chicken", "mutton",
+    "rabbit", "cod", "salmon", "tropical_fish", "pufferfish", "rotten_flesh",
+    "spider_eye", "cookie", "melon_slice", "pumpkin_pie", "sweet_berries",
+    "glow_berries", "dried_kelp", "chorus_fruit", "honey_bottle"
+}
+WEAPON_ITEMS = ("netherite_sword", "diamond_sword", "iron_sword", "stone_sword",
+                "golden_sword", "wooden_sword", "netherite_axe", "diamond_axe",
+                "iron_axe", "stone_axe", "golden_axe", "wooden_axe")
+
+def entity_identifier(bot, entity):
+    try:
+        entry = bot.registries.by_id("minecraft:entity_type", entity.type_id)
+        return entry.key if entry is not None else f"entity_type:{entity.type_id}"
+    except Exception:
+        return f"entity_type:{entity.type_id}"
+
+def world_state(bot, recent_events=None):
     p = bot.player
     players = []
     for entry in bot.players.values():
@@ -123,13 +152,93 @@ def world_state(bot):
             continue
         entity = next((e for e in bot.entities.values() if e.entity_uuid == entry.uuid), None)
         if entity:
-            distance = math.sqrt((entity.x-p.x)**2 + (entity.y-p.y)**2 + (entity.z-p.z)**2)
+            distance = math.dist((entity.x, entity.y, entity.z), (p.x, p.y, p.z))
             players.append({"name": entry.name, "x": round(entity.x, 1), "y": round(entity.y, 1),
                             "z": round(entity.z, 1), "distance": round(distance, 1)})
-    return {"connected": not bot.closed.is_set(), "username": bot.username,
-            "dimension": bot.session.dimension_name,
-            "position": {"x": round(p.x, 1), "y": round(p.y, 1), "z": round(p.z, 1)},
-            "health": p.health, "food": p.food, "players": players}
+    nearby_entities = []
+    for entity in bot.entities.values():
+        distance = math.dist((entity.x, entity.y, entity.z), (p.x, p.y, p.z))
+        if distance > 16:
+            continue
+        identifier = entity_identifier(bot, entity)
+        nearby_entities.append({"id": entity.entity_id, "type": identifier,
+            "hostile": identifier.rsplit(":", 1)[-1] in HOSTILE_MOBS,
+            "x": round(entity.x, 1), "y": round(entity.y, 1), "z": round(entity.z, 1),
+            "distance": round(distance, 1)})
+    nearby_entities.sort(key=lambda item: item["distance"])
+    blocks = []
+    bx, by, bz = math.floor(p.x), math.floor(p.y), math.floor(p.z)
+    for x in range(bx-4, bx+5):
+        for y in range(by-2, by+4):
+            for z in range(bz-4, bz+5):
+                state_id = bot.world.get_state_id(x, y, z)
+                if state_id in (0, -1):
+                    continue
+                definition = bot.world.block_states.get(state_id)
+                blocks.append({"block": definition.name, "x": x, "y": y, "z": z,
+                    "distance": round(math.dist((x, y, z), (p.x, p.y, p.z)), 1)})
+    blocks.sort(key=lambda item: item["distance"])
+    inventory = [{"slot": slot, "item": item.identifier, "count": item.count}
+        for slot, item in bot.player.inventory.items() if item.count and item.identifier]
+    return {
+        "connected": not bot.closed.is_set(), "username": bot.username,
+        "dimension": bot.session.dimension_name,
+        "position": {"x": round(p.x, 1), "y": round(p.y, 1), "z": round(p.z, 1)},
+        "rotation": {"yaw": round(p.yaw, 1), "pitch": round(p.pitch, 1)},
+        "on_ground": p.on_ground, "health": p.health, "food": p.food,
+        "saturation": round(p.saturation, 1), "players": players,
+        "nearby_entities": nearby_entities[:40], "nearby_blocks": blocks[:70],
+        "inventory": inventory[:45], "recent_events": list(recent_events or [])[-60:]
+    }
+
+def encode_varint(value):
+    value = int(value)
+    output = bytearray()
+    while True:
+        byte = value & 0x7f
+        value >>= 7
+        if value:
+            output.append(byte | 0x80)
+        else:
+            output.append(byte)
+            return bytes(output)
+
+async def attack_entity(bot, entity):
+    if bot.version.protocol < 776:
+        raise RuntimeError("Ataque automático requer protocolo Minecraft 26.2 ou superior.")
+    await bot.send_raw(0x01, encode_varint(entity.entity_id))
+
+async def eat_food_if_needed(bot):
+    if bot.player.food > 10 or bot.player.dead or bot.active_container is not None:
+        return False
+    def find_food():
+        found = []
+        for slot, item in bot.player.inventory.items():
+            if not item.count or not item.identifier:
+                continue
+            name = item.identifier.rsplit(":", 1)[-1]
+            if 36 <= slot <= 44 and name in FOOD_ITEMS:
+                priority = 0 if name.startswith("cooked_") else 1 if name in ("bread", "baked_potato", "golden_carrot") else 2
+                found.append((priority, slot, item))
+        return sorted(found, key=lambda row: row[0])[0] if found else None
+    selected = find_food()
+    if selected is None:
+        for slot, item in list(bot.player.inventory.items()):
+            if 9 <= slot <= 35 and item.count and item.identifier and item.identifier.rsplit(":", 1)[-1] in FOOD_ITEMS:
+                await bot.move_inventory_item(slot, quick_move=True)
+                await asyncio.sleep(0.35)
+                selected = find_food()
+                if selected is not None:
+                    break
+    if selected is None:
+        log("[SOBREVIVÊNCIA] Fome abaixo da metade, mas não há comida utilizável na hotbar.")
+        return False
+    _, slot, item = selected
+    await bot.select_hotbar_slot(slot - 36)
+    await bot.use_item(hand="main_hand")
+    log(f"[SOBREVIVÊNCIA] Comendo {item.identifier} (fome: {bot.player.food}/20).")
+    await asyncio.sleep(1.7)
+    return True
 
 async def authenticate():
     if str(MC.get("auth", "offline")).lower() != "microsoft":
