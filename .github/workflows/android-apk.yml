@@ -141,16 +141,16 @@ jobs:
 
           if "android.extra_manifest_application_arguments" in content:
               content = re.sub(
-                  r"(?m)^\\s*android\\.extra_manifest_application_arguments\\s*=.*$",
+                  r"(?m)^\s*android\.extra_manifest_application_arguments\s*=.*$",
                   setting,
                   content,
               )
           else:
-              match = re.search(r"(?m)^\\[app\\]\\s*$", content)
+              match = re.search(r"(?m)^\[app\]\s*$", content)
               if not match:
                   raise SystemExit("[app] section not found in buildozer.spec")
               insert_at = match.end()
-              content = content[:insert_at] + "\\n" + setting + content[insert_at:]
+              content = content[:insert_at] + "\n" + setting + content[insert_at:]
 
           spec.write_text(content, encoding="utf-8")
           if setting not in spec.read_text(encoding="utf-8"):
