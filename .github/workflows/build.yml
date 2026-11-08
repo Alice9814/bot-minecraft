@@ -35,10 +35,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install Mineflayer runtime dependencies
+      - name: Install Minecraft 26.2 compatible Mineflayer runtime
         run: |
-          npm install --prefix runtime-deps mineflayer mineflayer-pathfinder minecraft-data
-      - name: Install dependencies
+          npm install --prefix runtime-deps "mineflayer@npm:@wp2508/mineflayer@4.42.7" "minecraft-data@npm:@wp2508/minecraft-data@3.111.7" mineflayer-pathfinder
+      - name: Verify Minecraft 26.2 protocol data
+        run: |
+          node -e "const mineflayer=require('./runtime-deps/node_modules/mineflayer'); const mcdata=require('./runtime-deps/node_modules/minecraft-data')('26.2'); if (!mineflayer.createBot || !mcdata || !mcdata.version) process.exit(1); console.log('Mineflayer 26.2 data OK:', mcdata.version.minecraftVersion, 'protocol', mcdata.version.version)"
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
