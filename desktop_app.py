@@ -14,7 +14,7 @@ from interface_bundle import install_interface_files
 
 FROZEN = getattr(sys, "frozen", False)
 IS_ANDROID = (
-    IS_ANDROID
+    sys.platform == "android"
     or hasattr(sys, "getandroidapilevel")
     or "ANDROID_ARGUMENT" in os.environ
     or "ANDROID_PRIVATE" in os.environ
