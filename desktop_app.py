@@ -208,6 +208,13 @@ class MainWindow(QMainWindow):
                     config["ai"]["temperature"] = loaded["ollama"].get("temperature", 0.7)
         except Exception as exc:
             QMessageBox.warning(self, "Configuração", f"Não foi possível ler config.json:\n{exc}")
+        # Remove presets antigos de arquivos de configuração de versões anteriores.
+        for key in ("presets", "bot_presets", "preset"):
+            config.pop(key, None)
+        for section in config.values():
+            if isinstance(section, dict):
+                for key in ("presets", "bot_presets", "preset"):
+                    section.pop(key, None)
         return config
 
     def setup_tray(self):
@@ -302,6 +309,12 @@ class MainWindow(QMainWindow):
             for section in config:
                 if isinstance(incoming.get(section), dict):
                     config[section].update(incoming[section])
+            for key in ("presets", "bot_presets", "preset"):
+                config.pop(key, None)
+            for section in config.values():
+                if isinstance(section, dict):
+                    for key in ("presets", "bot_presets", "preset"):
+                        section.pop(key, None)
             config["minecraft"]["host"] = str(config["minecraft"]["host"]).strip()
             config["minecraft"]["username"] = str(config["minecraft"]["username"]).strip()
             config["minecraft"]["port"] = max(1, min(65535, int(config["minecraft"]["port"])))
