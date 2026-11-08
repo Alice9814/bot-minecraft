@@ -17,6 +17,7 @@ USER_DATA_DIR = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLoca
 USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_PATH = USER_DATA_DIR / "config.json"
 CONTROL_PATH = USER_DATA_DIR / "bot-control.json"
+LOG_PATH = USER_DATA_DIR / "bot.log"
 
 
 def make_icon(color="#7cdb8a"):
@@ -47,12 +48,14 @@ class MainWindow(QMainWindow):
         self.process.readyReadStandardOutput.connect(self.read_output)
         self.process.finished.connect(self.process_finished)
         self.paused = False
+        self.log_offset = 0
         self.config = self.load_config()
         self.build_ui()
         self.setup_tray()
         self.refresh_state()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh_state)
+        self.timer.timeout.connect(self.read_log_file)
         self.timer.start(1000)
 
     def load_config(self):
@@ -159,9 +162,12 @@ class MainWindow(QMainWindow):
             return
         self.save_config()
         CONTROL_PATH.write_text(json.dumps({"paused": False}), encoding="utf-8")
+        LOG_PATH.write_text("", encoding="utf-8")
+        self.log_offset = 0
         env = self.process.processEnvironment()
         env.insert("MINEBOT_CONFIG", str(CONFIG_PATH))
         env.insert("MINEBOT_CONTROL", str(CONTROL_PATH))
+        env.insert("MINEBOT_LOG", str(LOG_PATH))
         env.insert("PYTHONUNBUFFERED", "1")
         env.insert("NODE_PATH", str(APP_DIR / "node_modules"))
         env.insert("PATH", str(APP_DIR) + os.pathsep + env.value("PATH"))
@@ -194,6 +200,19 @@ class MainWindow(QMainWindow):
         data = bytes(self.process.readAllStandardOutput()).decode("utf-8", errors="replace")
         if data:
             self.console.append(data.rstrip())
+
+    def read_log_file(self):
+        if not FROZEN or not LOG_PATH.exists():
+            return
+        try:
+            with LOG_PATH.open("r", encoding="utf-8", errors="replace") as source:
+                source.seek(self.log_offset)
+                new_text = source.read()
+                self.log_offset = source.tell()
+            if new_text:
+                self.console.append(new_text.rstrip())
+        except OSError:
+            pass
 
     def process_finished(self, code, status):
         self.paused = False
