@@ -184,12 +184,10 @@ async def perform(bot, action):
         x, y, z = action["x"], action["y"], action["z"]
         if abs(x-p.x) > 100 or abs(y-p.y) > 50 or abs(z-p.z) > 100:
             raise ValueError("Destino muito distante (limite: 100 blocos).")
-        try:
-            await bot.navigate_to(x, z, y=y, timeout=60)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Não existe caminho acessível até ({x:.1f}, {y:.1f}, {z:.1f}): {exc}"
-            ) from exc
+        await bot.navigate_to(
+            x, z, y=y, timeout=60,
+            max_nodes=8192, max_drop=5.0, replans=5
+        )
 
 async def main_async():
     log("Inicializando ProtoBot (Minecraft Java 26.2)...")
@@ -238,18 +236,29 @@ async def main_async():
                     continue
 
                 p = bot.player
-                distance = math.sqrt((entity.x-p.x)**2 + (entity.y-p.y)**2 + (entity.z-p.z)**2)
-                if distance > 2.5:
+                dx = p.x - entity.x
+                dz = p.z - entity.z
+                horizontal_distance = math.hypot(dx, dz)
+                if horizontal_distance > 2.5:
+                    # GoalFollow equivalente: aproxima-se de um ponto a 1.5 blocos
+                    # do jogador, sem exigir que bot e alvo estejam na mesma altura.
+                    if horizontal_distance > 1.0e-4:
+                        target_x = entity.x + (dx / horizontal_distance) * 1.5
+                        target_z = entity.z + (dz / horizontal_distance) * 1.5
+                    else:
+                        target_x, target_z = entity.x + 1.5, entity.z
                     try:
-                        # Recalcula a rota frequentemente para acompanhar o jogador em movimento.
-                        await bot.navigate_to(entity.x, entity.z, y=entity.y, timeout=3)
+                        await bot.navigate_to(
+                            target_x, target_z, y=None, timeout=8,
+                            max_nodes=8192, max_drop=5.0, replans=5
+                        )
                     except asyncio.TimeoutError:
                         pass
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
-                        log(f"[BOT] Não consegui alcançar {player_name}; vou tentar novamente:", exc)
-                await asyncio.sleep(0.5)
+                        log(f"[BOT] Não consegui alcançar {player_name}; vou recalcular:", exc)
+                await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             raise
         finally:
@@ -361,12 +370,39 @@ async def main_async():
                 elif re.search(r"\b(me siga|siga-me|me acompanha|venha comigo)\b", normalized_message):
                     action = {"type": "follow", "player": name}
                 elif ("direcao aleatoria" in normalized_message or "lado aleatorio" in normalized_message
-                      or "olhe aleatoriamente" in normalized_message):
+                      or "olhe aleatoriamente" in normalized_message
+                      or "look for a random direction" in normalized_message):
                     action = {
                         "type": "look",
                         "yaw": round(random.uniform(-180, 180), 1),
                         "pitch": round(random.uniform(-20, 20), 1)
                     }
+                elif any(phrase in normalized_message for phrase in (
+                    "olhe para mim", "olha para mim", "olhe pra mim",
+                    "olha pra mim", "look at me", "look towards me"
+                )):
+                    target = next(
+                        (entry for entry in bot.players.values()
+                         if entry.name and entry.name.casefold() == name.casefold()),
+                        None
+                    )
+                    entity = next(
+                        (candidate for candidate in bot.entities.values()
+                         if target is not None and candidate.entity_uuid == target.uuid),
+                        None
+                    )
+                    if entity is not None:
+                        dx = entity.x - bot.player.x
+                        dy = (entity.y + 1.62) - (bot.player.y + 1.62)
+                        dz = entity.z - bot.player.z
+                        horizontal = math.hypot(dx, dz)
+                        action = {
+                            "type": "look",
+                            "yaw": math.degrees(math.atan2(-dx, dz)),
+                            "pitch": -math.degrees(math.atan2(dy, max(horizontal, 1.0e-6)))
+                        }
+                    else:
+                        action = {"type": "chat", "text": f"Não consigo ver sua posição, {name}."}
                 else:
                     answer = await asyncio.to_thread(model.generate, model_messages)
                     action = parse_action(answer)
@@ -410,10 +446,28 @@ async def main_async():
                     try:
                         await perform(bot, sub_action)
                     except Exception as action_error:
-                        if sub_action.get("type") == "move_to" and "caminho acessível" in str(action_error).lower():
+                        if sub_action.get("type") == "move_to":
                             destination = f"{sub_action['x']:.1f}, {sub_action['y']:.1f}, {sub_action['z']:.1f}"
-                            unreachable_destinations[destination] = time.monotonic() + 300
-                            log("[IA] Rota impossível; destino bloqueado por 5 minutos:", destination)
+                            log(
+                                "[IA] Falha ao navegar até", destination,
+                                "|", type(action_error).__name__, ":", action_error,
+                                "| posição atual:",
+                                tuple(round(v, 2) for v in (
+                                    bot.physics_state.position.x,
+                                    bot.physics_state.position.y,
+                                    bot.physics_state.position.z
+                                )),
+                                "| velocidade:",
+                                tuple(round(v, 3) for v in (
+                                    bot.physics_state.velocity.x,
+                                    bot.physics_state.velocity.y,
+                                    bot.physics_state.velocity.z
+                                )),
+                                "| no_chao:", bot.physics_state.on_ground,
+                                "| chunks:", len(bot.world.chunks)
+                            )
+                            # Não bloqueia por 5 minutos: uma falha pode ser temporária
+                            # (chunk ainda não carregado, queda ou correção do servidor).
                         else:
                             log("[IA] Falha ao executar ação:", action_error)
             except Exception as exc:
@@ -437,6 +491,25 @@ async def main_async():
         # while navigation is running. The handler returns immediately.
         asyncio.create_task(process_player_message(name, text_message))
 
+    async def physics_loop():
+        log("[FISICA] Simulação contínua ativada (20 ticks por segundo).")
+        loop = asyncio.get_running_loop()
+        while not stopped.is_set() and not bot.closed.is_set():
+            started = loop.time()
+            try:
+                if bot.world_ready.is_set():
+                    # tick() suspende-se automaticamente enquanto navigate_to()
+                    # controla o movimento, evitando dois controladores simultâneos.
+                    await bot.tick(MovementInput())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log("[FISICA] Erro ao atualizar física:", type(exc).__name__, exc)
+                await asyncio.sleep(0.25)
+                continue
+            elapsed = loop.time() - started
+            await asyncio.sleep(max(0.0, 0.05 - elapsed))
+
     async def control_loop():
         nonlocal paused
         last = paused
@@ -448,11 +521,14 @@ async def main_async():
                 last = paused
             await asyncio.sleep(0.35)
 
+    physics_task = asyncio.create_task(physics_loop())
     control_task = asyncio.create_task(control_loop())
     try:
         await stopped.wait()
     finally:
+        physics_task.cancel()
         control_task.cancel()
+        await asyncio.gather(physics_task, control_task, return_exceptions=True)
         if follow_task is not None:
             follow_task.cancel()
             await asyncio.gather(follow_task, return_exceptions=True)
